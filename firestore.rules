@@ -1,17 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-
-    match /sources/{doc} { allow read, write: if signedIn(); }
-    match /knowledge_chunks/{doc} { allow read, write: if signedIn(); }
-    match /agent_skills/{doc} { allow read, write: if signedIn(); }
-    match /project_decisions/{doc} { allow read, write: if signedIn(); }
-    match /build_tasks/{doc} { allow read, write: if signedIn(); }
-    match /approvals/{doc} { allow read, write: if signedIn(); }
-    match /generated_code/{doc} { allow read, write: if signedIn(); }
-    match /reviews/{doc} { allow read, write: if signedIn(); }
-    match /security_reviews/{doc} { allow read, write: if signedIn(); }
-    match /agent_logs/{doc} { allow read, write: if signedIn(); }
+    // All access goes through authenticated Cloud Functions (Admin SDK), which
+    // enforce per-user data isolation. Direct client access is denied as a
+    // defense-in-depth measure.
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }

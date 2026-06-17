@@ -1,43 +1,41 @@
-# AI Builder Agent PRO Architecture
+# GHOST Agent Builder Architecture
 
 ## Core loop
 
 ```text
-Research -> Knowledge Memory -> Skill Memory -> Decision Memory -> Plan -> Generate -> Review -> Approval -> Execute -> Test -> Log -> Improve
+Topic -> Sources (links) -> Knowledge Memory -> Skills -> Project (read-only GitHub) -> Design -> Plan (md files + prompts)
 ```
+
+## Multi-tenancy
+
+Every document carries a `userId`. All reads filter by `userId`, so users are
+fully isolated. Authentication is a Bearer session token validated on every
+request (see `src/auth.ts`). Direct client access to Firestore is denied; all
+access goes through authenticated Cloud Functions (Admin SDK).
 
 ## Firestore collections
 
-- `sources` — studied websites and metadata.
-- `knowledge_chunks` — factual memory chunks with embeddings.
-- `agent_skills` — procedural memory: learned methods and patterns.
-- `project_decisions` — architectural decisions and reasons.
-- `build_tasks` — backlog: todo/in_progress/review/approved/done.
-- `approvals` — human approval queue.
-- `generated_code` — code drafts and implementation plans.
-- `reviews` — code/product/architecture reviews.
-- `security_reviews` — security checks.
-- `agent_logs` — audit trail.
+- `users` — credentials (scrypt hash), `sessionToken`, optional `githubToken`.
+- `topics` — user-defined themes that group sources and produce skills.
+- `sources` — studied links (websites / GitHub), with denormalized `chunkCount`.
+- `knowledge_chunks` — memory chunks with embeddings; `scope` is `topic` or `project`.
+- `agent_skills` — reusable skills generated from a topic's knowledge.
+- `projects` — user projects, with `repoUrl`, `skillIds`, GitHub `summary`, `ingestStatus`.
+- `project_decisions` — design decisions per project/section.
+- `generated_plans` — generated md files and agent prompts.
+- `agent_logs` — per-user audit trail.
 
-## Agent roles
+## Backend modules (`functions/src`)
 
-- Researcher: learns sites and docs.
-- Analyst: extracts requirements and patterns.
-- Architect: designs modules, APIs, DB and screens.
-- Coder: generates code plans and patches.
-- Reviewer: finds bugs, gaps, weak assumptions.
-- Security: checks secrets, permissions, prompt injection and unsafe actions.
-- Manager: tracks tasks, statuses and approvals.
+- `firebase.ts`, `util.ts`, `ai.ts`, `memory.ts`, `pure.ts` — infrastructure and helpers.
+- `auth.ts` — password hashing (scrypt), seed users, `requireAuth` middleware.
+- `ratelimit.ts` — best-effort per-user rate limiting.
+- `ssrf.ts` — SSRF-guarded URL fetching (blocks private/loopback/link-local hosts).
+- `github.ts` — read-only repository ingestion (GET requests only).
+- `routes/*` — one router per area (topics, sources, skills, projects, ask, design, plans, dashboard).
 
 ## Safety model
 
-The agent should never directly change production. Dangerous actions require a record in `approvals` and explicit approval.
-
-High-risk actions:
-
-- applying generated code;
-- changing Firestore rules;
-- deleting data;
-- deployments;
-- adding payment/auth logic;
-- changing secrets.
+- The agent reads GitHub repositories but never modifies them.
+- Generated md files and prompts are downloadable artifacts; nothing is applied automatically.
+- Secrets stay on the server (OpenAI key, GitHub token); CORS can be restricted via `ALLOWED_ORIGINS`.

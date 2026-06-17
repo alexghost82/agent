@@ -1,67 +1,47 @@
 # API
 
-All endpoints are served by Firebase Functions under `/api`.
+All endpoints are served by Firebase Functions under `/api`. Every endpoint
+except `GET /health` and `POST /login` requires `Authorization: Bearer <token>`
+(the token returned by `/login`). All data is isolated per user.
 
 ## Basic
 
 - `GET /health`
-- `GET /dashboard`
+- `POST /login` -> `{ token, user }`
+- `GET /dashboard` (counts + recent logs for the current user)
 
-## Research and memory
+## Topics & sources
 
-- `POST /learn`
+- `POST /topics` `{ name, description? }`
+- `GET /topics`
+- `POST /learn` `{ topicId, url, tags? }` (SSRF-guarded fetch + embedding)
+- `GET /sources?topicId=`
 
-```json
-{ "url": "https://example.com", "tags": ["docs"], "topic": "platform" }
-```
+## Skills
 
-- `POST /ask`
+- `POST /extract-skills` `{ topicId }` (generates skills from a topic's knowledge)
+- `POST /skill` `{ topicId, skillName, description, example? }` (manual)
+- `GET /skills?topicId=`
 
-```json
-{ "question": "What did we learn?", "limit": 8 }
-```
+## Projects & GitHub (read-only)
 
-- `POST /skill`
+- `POST /projects` `{ name, description, stack?, repoUrl? }`
+- `GET /projects`
+- `PATCH /projects/:id` `{ skillIds?, name?, description?, stack?, repoUrl? }`
+- `POST /github-token` `{ token }` (stored server-side only)
+- `POST /projects/:id/connect-github` `{ repoUrl }`
+  - Read-only: GET requests to the GitHub API only. The agent never writes to the repo.
 
-```json
-{ "skillName": "Onboarding design", "description": "...", "example": "..." }
-```
+## Ask
 
-## Planning and code
+- `POST /ask` `{ question, limit? }`
 
-- `POST /plan-platform`
+## Design
 
-```json
-{ "idea": "A platform for ..." }
-```
+- `POST /design` `{ projectId, section? }`
+- `GET /design?projectId=`
 
-- `POST /generate-code`
+## Plan
 
-```json
-{ "task": "Build auth module", "stack": "Next.js + Firebase", "createApproval": true }
-```
-
-## Tasks
-
-- `POST /tasks`
-- `GET /tasks`
-- `POST /execute-task`
-
-```json
-{ "taskId": "..." }
-```
-
-## Approval flow
-
-- `POST /approvals`
-- `GET /approvals`
-- `POST /approval-decision`
-
-```json
-{ "approvalId": "...", "decision": "approved", "comment": "OK" }
-```
-
-## Review
-
-- `POST /review`
-- `POST /security-review`
+- `POST /generate-plan` `{ projectId, instructions? }` -> `{ files: [{path, content}], prompts: [{title, content}] }`
+- `GET /generated-plans?projectId=`

@@ -206,6 +206,29 @@ pre { white-space: pre-wrap; word-break: break-word; overflow: auto; background:
 .skill-list p { margin: 0 0 10px; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .skill-ex { display: block; font-size: 12px; color: var(--accent); background: var(--bg); border: 1px solid var(--line-soft); border-radius: 8px; padding: 7px 9px; white-space: pre-wrap; }
 
+/* card title */
+.card-title { font-size: 14px; margin: 0 0 10px; color: var(--text); }
+
+/* github ingest status */
+.status-none { color: var(--muted); }
+.status-ingesting { color: var(--warn); border-color: var(--warn); }
+.status-ready { color: var(--ok); border-color: var(--ok); }
+.status-error { color: var(--danger); border-color: var(--danger); }
+.proj-item { flex-wrap: wrap; }
+
+/* skill picker */
+.skill-pick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 6px; }
+.check { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 13px; color: var(--text); cursor: pointer; margin: 0; }
+.check input { width: auto; }
+.check span { font-weight: 600; }
+
+/* generated files / prompts */
+.file-list { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.file-list li { background: var(--panel); border: 1px solid var(--line); border-radius: 13px; padding: 14px; }
+.file-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.file-head b { font-size: 14px; color: var(--accent); }
+.file-body { max-height: 320px; }
+
 /* RTL */
 .app.rtl .sidebar { border-right: 0; border-left: 1px solid var(--line); }
 .app.rtl .nav-item, .app.rtl .seg button { text-align: right; }

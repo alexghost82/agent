@@ -20,3 +20,26 @@ jobs:
         run: cd functions && npm install
       - name: Build functions
         run: cd functions && npm run build
+      - name: Test functions
+        run: cd functions && npm test
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan for committed secrets
+        run: |
+          set -e
+          # Fail the build if obvious secrets are committed. Example/template files are excluded.
+          PATTERN='(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
+          if grep -RInaE "$PATTERN" \
+              --exclude-dir=node_modules \
+              --exclude-dir=.git \
+              --exclude='*.example' \
+              --exclude='*.lock' \
+              --exclude='package-lock.json' \
+              .; then
+            echo "::error::Potential secret found in repository"
+            exit 1
+          fi
+          echo "No secrets detected."
