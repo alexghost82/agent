@@ -1,8 +1,14 @@
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "./firebase";
+import { bumpCounter } from "./stats";
 
 export function serverTime() {
   return FieldValue.serverTimestamp();
+}
+
+function logTtlMs(): number {
+  const days = Number(process.env.AGENT_LOGS_TTL_DAYS);
+  return (Number.isFinite(days) && days > 0 ? days : 90) * 24 * 60 * 60 * 1000;
 }
 
 export async function logEvent(
@@ -16,6 +22,10 @@ export async function logEvent(
     type,
     message,
     data,
-    createdAt: serverTime()
+    createdAt: serverTime(),
+    // TTL field: a Firestore TTL policy on `expireAt` reaps old logs (infra is
+    // configured by the Architect/ops; the field is written here).
+    expireAt: Timestamp.fromMillis(Date.now() + logTtlMs())
   });
+  if (userId) await bumpCounter(userId, "agent_logs");
 }

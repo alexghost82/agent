@@ -1,9 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // All access goes through authenticated Cloud Functions (Admin SDK), which
-    // enforce per-user data isolation. Direct client access is denied as a
-    // defense-in-depth measure.
+    // SECURITY MODEL — DENY ALL DIRECT CLIENT ACCESS (defense-in-depth).
+    //
+    // Rationale (frozen by Architect, see docs/CONTRACT.md and
+    // docs/adr/ADR-0006-firestore-backups.md / ARCHITECTURE.md):
+    //   * The web client never talks to Firestore directly. All reads/writes go
+    //     through authenticated Cloud Functions using the Admin SDK, which bypass
+    //     these rules by design.
+    //   * Per-user tenant isolation is enforced in the application layer: every
+    //     query filters `where("userId","==",<caller>)` and every mutation
+    //     re-checks ownership before writing.
+    //   * Because no field-level client rules exist, this deny-all is the only
+    //     safe posture: if a client SDK is ever wired up by mistake, it gets zero
+    //     access instead of leaking cross-tenant data.
+    //
+    // DO NOT relax this rule. Any client-facing data access must be added as an
+    // explicit, owner-scoped Cloud Function endpoint, not a Firestore rule.
     match /{document=**} {
       allow read, write: if false;
     }

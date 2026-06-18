@@ -16,12 +16,64 @@ jobs:
         run: npm install
       - name: Typecheck Next.js
         run: npm run typecheck
+      - name: Lint frontend
+        # Next 16 removed `next lint`; linting is now the ESLint CLI driven by a
+        # root flat config (owned by the Frontend/Architect missions). Run it when
+        # a config is present; otherwise emit a warning and pass so this gate
+        # auto-activates the moment the config lands, without blocking unrelated work.
+        run: |
+          shopt -s nullglob
+          configs=(eslint.config.* .eslintrc*)
+          if [ ${#configs[@]} -gt 0 ]; then
+            echo "ESLint config found (${configs[*]}); running frontend lint."
+            npx --no-install eslint .
+          else
+            echo "::warning title=Frontend lint pending::No root ESLint flat config found (Next 16 removed 'next lint'). Add eslint.config.mjs (e.g. 'npx @next/codemod next-lint-to-eslint-cli .') and this gate will run automatically."
+          fi
       - name: Install functions deps
         run: cd functions && npm install
       - name: Build functions
         run: cd functions && npm run build
-      - name: Test functions
+      - name: Test functions (unit; integration suites self-skip without the emulator)
         run: cd functions && npm test
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Set up Java (required by the Firestore emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install functions deps
+        run: cd functions && npm install
+      - name: Install emulator + coverage tooling (not persisted to package.json)
+        run: cd functions && npm install --no-save firebase-tools@13 @vitest/coverage-v8@2.1.9
+      - name: Integration tests + coverage gate (Firestore emulator)
+        env:
+          # AES master secret so the PAT/keys encryption paths exercise end to end.
+          KEYS_ENC_SECRET: ci-test-master-secret-not-a-real-key
+        run: |
+          cd functions
+          npx firebase emulators:exec --only firestore --project demo-ghost \
+            "npx vitest run \
+              --coverage \
+              --coverage.provider=v8 \
+              --coverage.reporter=text \
+              --coverage.reporter=lcov \
+              --coverage.include='src/**' \
+              --coverage.exclude='src/index.ts' \
+              --coverage.exclude='src/providers/**' \
+              --coverage.exclude='src/github.ts' \
+              --coverage.exclude='src/concurrency.ts' \
+              --coverage.thresholds.lines=65 \
+              --coverage.thresholds.statements=65 \
+              --coverage.thresholds.functions=75 \
+              --coverage.thresholds.branches=60"
 
   secret-scan:
     runs-on: ubuntu-latest

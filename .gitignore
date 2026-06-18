@@ -13,3 +13,7 @@ functions/lib
 functions/node_modules
 functions/.env
 functions/.env.local
+ios/**/GoogleService-Info.plist
+ios/**/*.xcuserstate
+ios/**/xcuserdata
+ios/**/DerivedData

@@ -1,21 +1,20 @@
 import { Router, Response } from "express";
 import { db } from "../firebase";
 import { serverTime, logEvent } from "../util";
-import { tsMillis } from "../pure";
 import { AuthedRequest } from "../auth";
+import { listScoped } from "../listing";
+import { bumpCounter } from "../stats";
+import { sendError } from "../errors";
 import { TopicSchema } from "../schemas";
 
 export const topicsRouter = Router();
 
 topicsRouter.get("/topics", async (req: AuthedRequest, res: Response) => {
   try {
-    const snap = await db.collection("topics").where("userId", "==", req.userId).limit(200).get();
-    const topics = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a: any, b: any) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+    const topics = await listScoped({ collection: "topics", userId: req.userId! });
     res.json({ topics });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message || "topics_failed" });
+  } catch (err) {
+    sendError(req, res, err);
   }
 });
 
@@ -28,9 +27,10 @@ topicsRouter.post("/topics", async (req: AuthedRequest, res: Response) => {
       description: body.description || null,
       createdAt: serverTime()
     });
+    await bumpCounter(req.userId!, "topics");
     await logEvent(req.userId!, "topic_created", body.name, { id: ref.id });
     res.json({ id: ref.id, status: "created" });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message || "topic_create_failed" });
+  } catch (err) {
+    sendError(req, res, err);
   }
 });
