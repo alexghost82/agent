@@ -1,36 +1,62 @@
 # TECH_DEBT.md
 
-## Technical Debt Register (sorted by ROI, highest first)
+## Technical Debt Register (open items, sorted by ROI, highest first)
 
-| # | Priority | Issue | Risk | Cost of Delay | Effort | ROI | Evidence |
-|---|---|---|---|---|---|---|---|
-| 1 | High | In-memory vector search (≤1500 docs/query) | Cost blowup, capped recall, latency | High | M-H | ★★★★★ | `memory.ts:24-45` |
-| 2 | High | GitHub PAT stored plaintext | Secret leak | High | L | ★★★★★ | `projects.ts:79,99` |
-| 3 | High | Session tokens never expire / no revoke | Durable account takeover | High | L-M | ★★★★★ | `auth.ts:67`, `public.ts:25` |
-| 4 | High | `/login` not rate limited | Brute force | High | L | ★★★★★ | `public.ts:14` |
-| 5 | High | GitHub ingest synchronous in request | Timeouts, partial state | Med-High | M-H | ★★★★ | `github.ts:84-111` |
-| 6 | Med | No `.max()` bounds on inputs/keys | Cost abuse / DoS | Med | L | ★★★★ | `schemas.ts:58-62`, `test/keys.test.ts:255` |
-| 7 | Med | One embedding HTTP call per chunk | Latency/cost | Med | M | ★★★ | `sources.ts:56`, `github.ts:90` |
-| 8 | Med | `ensureSeedUsers()` every login | Extra reads/latency | Low-Med | L | ★★★★ | `public.ts:17` |
-| 9 | Med | `agent_logs` unbounded, no TTL/index | Storage growth, slow lists | Med | M | ★★★ | `util.ts:14`, `dashboard.ts:28` |
-| 10 | Med | In-memory rate limiter only | Limits bypassable | Med | M | ★★★ | `ratelimit.ts:5-6` |
-| 11 | Med | No route/integration tests | Regressions in auth/isolation | Med | M | ★★★ | `functions/test/*` (unit only) |
-| 12 | Low | CORS reflects all origins by default | Broad exposure | Low-Med | L | ★★★ | `index.ts:42-47` |
-| 13 | Low | Verbose `err.message` to client | Info leak | Low | L | ★★★ | `ask.ts:19` et al. |
-| 14 | Low | Silent decrypt-failure fallback to env key | Masked tampering, surprise billing | Low | L | ★★ | `ai.ts:33-39` |
-| 15 | Low | Provider client cache unbounded | Slow memory growth | Low | L | ★★ | `providers/openai.ts:5` |
-| 16 | Low | `page.tsx` 1153-line single component | Maintainability | Low | M | ★★ | `app/page.tsx` |
-| 17 | Low | `firestore.indexes.json` empty; in-memory sorts everywhere | Scales poorly | Low-Med | M | ★★ | `firestore.indexes.json`, `topics.ts:13` |
-| 18 | Low | `"latest"` pinned root deps | Non-reproducible builds | Low-Med | L | ★★★ | `package.json:15-28` |
+| # | Priority | Issue | Risk | Effort | ROI | Evidence |
+|---|---|---|---|---|---|---|
+| 1 | High | In-memory vector search (≤`VECTOR_CANDIDATE_CAP`, default 1500 docs/query) | Cost blowup, capped recall, latency | M-H | ★★★★★ | `memory.ts:32-65` |
+| 2 | High | GitHub ingest synchronous in request | Timeouts, partial state | M-H | ★★★★ | `github.ts ingestRepo`, `routes/projects.ts:104-150` |
+| 3 | Med | Session token in `localStorage` (XSS) | Token theft | M | ★★★★ | `app/api.ts:26-27`, `app/useGhostData.ts:80` |
+| 4 | Med | Per-route rate limiter is in-memory only | Limits bypassable across instances | M | ★★★ | `ratelimit.ts:9-33` (login uses `consumeDistributed`) |
+| 5 | Low/Med | CORS reflects all origins outside production | Broad exposure in non-prod | L | ★★★ | `index.ts:47-55` |
+| 6 | Low | Env-key fallback on user-key decrypt failure | Surprise billing on env key | L | ★★ | `ai.ts:46-57` (now logged, not silent) |
+
+## In-progress product debt (CONTRACT v2)
+
+These are not regressions but surface area the contract freezes:
+
+- **BUILD mode** service + endpoints are wired (`build.ts runBuild`,
+  `routes/build.ts` with `POST /projects/:id/build`, `GET /builds`,
+  `GET /builds/:id`, mounted in `index.ts`; `BuildSchema` +
+  `build_runs`/`build_artifacts` indexes). Recently landed and under end-to-end
+  verification (CONTRACT §v2.2).
+- **Self-learning loop**, **skill schema v2**, and **deep ingest** are specified
+  but not fully landed (CONTRACT §v2.3–v2.5).
+
+## Resolved since the previous register (verified in code)
+
+- GitHub PAT now encrypted at rest (`routes/projects.ts:96`, `crypto.ts`).
+- Session tokens hashed + expiring + revocable (`auth.ts`, `routes/session.ts`).
+- `/login` rate limited (`ratelimit.ts loginThrottle`).
+- `.max()` bounds on all schemas, incl. API keys (`schemas.ts`).
+- Batched embeddings, one call per batch (`ai.ts embeddingBatch`,
+  `routes/sources.ts`).
+- Seed users once per instance, not per login (`auth.ts ensureSeedUsersOnce`).
+- `agent_logs` TTL field + `userId, createdAt` index (`util.ts`,
+  `firestore.indexes.json`).
+- Maintained dashboard counters instead of 8 `count()` per load (`stats.ts`,
+  `routes/dashboard.ts`).
+- Composite indexes populated; ordered listing with fallback (`listing.ts`).
+- LRU-bounded provider client cache (`lru.ts`, `providers/*`).
+- Coded `{ error, requestId }` envelope (`errors.ts`).
+- Integration/route tests added (`functions/test/integration/**`).
+- Root dependencies pinned to semver ranges (`package.json`).
+- Frontend split into panels/components; the 1000-line single component is gone
+  (`app/page.tsx` ~56 lines, `app/components/**`).
 
 ## Code smells / quality forensics
 
-- **`any` types in routes/AI layer** (`ai.ts:66 context: any[]`, many `err: any`) reduce type safety; otherwise TS strictness is good.
-- **Duplication:** the list-and-sort-in-memory pattern repeats across `topics.ts`, `sources.ts`, `skills.ts`, `projects.ts`, `design.ts`, `plans.ts` — a shared helper would DRY it up.
-- **Duplicate skill-fetch logic** between `design.ts:13-20` and `plans.ts:39-45`.
-- **No dead code / circular deps detected** in the reviewed modules; module boundaries are clean.
-- **Frozen contract is well done** (`providers/types.ts`) and enforced by type tests — a positive, not debt.
-- **`out/` build artifacts and `tsconfig.tsbuildinfo` present in working tree** but gitignored; `firestore-debug.log` present locally and gitignored (not committed).
+- Some `any` types remain in the AI/route layers; otherwise TS strictness is
+  good.
+- A shared `listScoped` helper now DRYs up the previous list-and-sort-in-memory
+  duplication across routers (`listing.ts`).
+- No dead code / circular deps detected in the reviewed modules; module
+  boundaries are clean (`ai.ts` documents the deliberate avoidance of a circular
+  import with `memory.ts`).
+- `out/` build artifacts and `tsconfig.tsbuildinfo` exist in the working tree but
+  are gitignored. `firestore-debug.log` was removed from the tree (gitignored).
 
 ## Dependency hygiene
-- Root app pins every dependency to `"latest"` (`package.json:15-28`) — reproducibility/supply-chain risk. Functions pin proper semver ranges (`functions/package.json`). Recommend pinning root deps.
+
+- Root app pins deps to semver ranges (`package.json`); functions pin proper
+  ranges too (`functions/package.json`). No `"latest"` pins remain.

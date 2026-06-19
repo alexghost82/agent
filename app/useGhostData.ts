@@ -35,6 +35,7 @@ export function useGhostData() {
   const [skills, setSkills] = useState<Json[]>([]);
   const [projects, setProjects] = useState<Json[]>([]);
   const [plans, setPlans] = useState<Json[]>([]);
+  const [builds, setBuilds] = useState<Json[]>([]);
 
   const [selectedTopic, setSelectedTopic] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
@@ -103,6 +104,7 @@ export function useGhostData() {
     setSkills([]);
     setProjects([]);
     setPlans([]);
+    setBuilds([]);
     setSelectedTopic("");
     setSelectedProject("");
     setSelectedSkillIds([]);
@@ -175,6 +177,17 @@ export function useGhostData() {
       /* */
     }
   }, []);
+  const loadBuilds = useCallback(async (projectId: string) => {
+    if (!projectId) {
+      setBuilds([]);
+      return;
+    }
+    try {
+      setBuilds((await getJson(`/builds?projectId=${encodeURIComponent(projectId)}`)).runs || []);
+    } catch {
+      /* */
+    }
+  }, []);
 
   const refreshAll = useCallback(() => {
     loadDashboard();
@@ -202,7 +215,7 @@ export function useGhostData() {
       loadProjects();
       loadSkills();
     }
-    if (active === "design" || active === "plan") loadProjects();
+    if (active === "design" || active === "plan" || active === "build") loadProjects();
   }, [active, auth, loadDashboard, loadTopics, loadSkills, loadProjects]);
 
   useEffect(() => {
@@ -211,9 +224,10 @@ export function useGhostData() {
 
   useEffect(() => {
     loadPlans(selectedProject);
+    loadBuilds(selectedProject);
     const p = projects.find((x) => String(x.id) === selectedProject);
     setSelectedSkillIds(Array.isArray(p?.skillIds) ? (p!.skillIds as string[]) : []);
-  }, [selectedProject, projects, loadPlans]);
+  }, [selectedProject, projects, loadPlans, loadBuilds]);
 
   /* ---------------- ingest progress polling ---------------- */
   const ingesting = useMemo(
@@ -467,6 +481,26 @@ export function useGhostData() {
     [run, loadPlans, loadDashboard, lang]
   );
 
+  const build = useCallback(
+    async (projectId: string, planId: string, instructions: string) =>
+      run("build", async () => {
+        const r = await postJson(`/projects/${projectId}/build`, {
+          planId: planId || undefined,
+          instructions: instructions.trim() || undefined,
+          lang
+        });
+        loadBuilds(projectId);
+        loadDashboard();
+        return r;
+      }),
+    [run, loadBuilds, loadDashboard, lang]
+  );
+
+  const openBuild = useCallback(
+    async (id: string) => run("buildOpen", () => getJson(`/builds/${encodeURIComponent(id)}`)),
+    [run]
+  );
+
   return {
     // i18n / prefs
     lang,
@@ -500,6 +534,7 @@ export function useGhostData() {
     skills,
     projects,
     plans,
+    builds,
     ingesting,
     // selections
     selectedTopic,
@@ -516,6 +551,7 @@ export function useGhostData() {
     loadSkills,
     loadProjects,
     loadPlans,
+    loadBuilds,
     refreshAll,
     // actions
     createTopic,
@@ -534,7 +570,9 @@ export function useGhostData() {
     saveProjectSkills,
     ask,
     design,
-    generatePlan
+    generatePlan,
+    build,
+    openBuild
   };
 }
 

@@ -1,39 +1,56 @@
-# Обзор проекта Ghost Live: Админ-панель мониторинга использования OpenAI API токенов и биллинга
+# GHOST Agent Builder 2.0 — Overview
 
-## Цель
+GHOST is a multi-tenant AI agent that turns research into software designs. It
+**learns** from URLs and GitHub repositories (read-only), **remembers** the
+material in vector memory, **extracts reusable skills**, and then **designs** and
+**plans** projects. A **BUILD** mode (landing now) generates real project files
+into a Firestore-backed workspace for review and download — it never writes to
+GitHub or any external repository.
 
-Добавить в существующий проект Ghost Internal Interface модуль администрирования, который позволит:
+## What it does
 
-- Управлять пользователями (создавать, редактировать, удалять).
-- Отслеживать использование OpenAI API токенов каждым пользователем.
-- Вести биллинг на основе использованных токенов.
-- Просматривать статистику по количеству чатов, сообщений и каналов на пользователя.
-- Обеспечить удобный и безопасный UI для администраторов с фильтрами, сортировкой и экспортом данных.
+| Capability | Summary |
+|---|---|
+| Learn | Study a URL or GitHub repo behind an SSRF guard; chunk, embed, store. |
+| Remember | Owner-scoped vector recall over `knowledge_chunks`. |
+| Skill | Extract reusable skills from a topic's knowledge. |
+| Design | Produce a project design/architecture from idea + memory. |
+| Plan | Produce Markdown plans and agent prompts. |
+| Build | Generate real files into a Firestore workspace, downloadable client-side. |
 
-## Контекст
+The product loop:
 
-Ghost Internal Interface — это локально-ориентированная AI чат-платформа с мультипользовательской поддержкой, продвинутой памятью и базой знаний. Взаимодействие с OpenAI API происходит через backend на FastAPI с возможностью fallback на локальный LLM.
+```text
+learn  →  remember  →  skill  →  design  →  plan  →  BUILD
+```
 
-В текущей версии отсутствует функциональность по учету и мониторингу использования OpenAI API токенов и биллингу.
+## Shape of the system
 
-## Основные задачи
+- **Web client** — Next.js static export (`output: "export"`) in `app/`, with
+  i18n for EN/HE/RU. Served by Firebase Hosting.
+- **Backend** — a single Express app (Node 22) exported as the `api` Firebase
+  Cloud Function in `functions/`. One router per area under
+  `functions/src/routes/*`.
+- **iOS client** — native SwiftUI app in `ios/GhostAgent` that talks to the same
+  Functions HTTPS API.
+- **Storage** — Firestore via the Admin SDK only. Client access is deny-all
+  (`firestore.rules`); all product data is server-mediated.
+- **AI** — pluggable OpenAI / Gemini providers; users may bring their own key
+  (encrypted at rest), with a server env key as fallback.
 
-1. Расширить backend:
-   - Добавить модели для хранения статистики использования токенов и биллинга.
-   - Логировать использование токенов при каждом вызове OpenAI API.
-   - Реализовать API для получения статистики и биллинга с фильтрами и пагинацией.
-   - Добавить роутер для админ-панели с разграничением доступа.
+## Multi-tenancy & safety
 
-2. Расширить frontend:
-   - Добавить раздел админ-панели с таблицами, графиками и фильтрами.
-   - Обеспечить доступ к админ-панели только администраторам.
-   - Реализовать экспорт данных в CSV/JSON.
+- Every document carries a `userId`; every read is scoped to the owner, so
+  tenants are isolated.
+- Bearer session tokens are validated on every request; only a hash of the token
+  is stored, with a hard expiry.
+- GitHub access is GET-only and BUILD artifacts stay in the owner's Firestore
+  workspace — nothing is applied to any external repo.
 
-3. Обеспечить безопасность и совместимость с текущим функционалом.
+## Where to go next
 
-## Ожидаемый результат
-
-- Надежная и безопасная админ-панель для мониторинга использования OpenAI API и биллинга.
-- Возможность управлять пользователями и просматривать их активность.
-- Инструменты для анализа расходов и контроля квот.
-- Документация и тесты для новой функциональности.
+- Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Integration contract (frozen, v2): [`docs/CONTRACT.md`](docs/CONTRACT.md)
+- HTTP API: [`docs/API.md`](docs/API.md)
+- Current state & gaps: [`ROADMAP.md`](ROADMAP.md), [`TECH_DEBT.md`](TECH_DEBT.md),
+  [`SECURITY_REPORT.md`](SECURITY_REPORT.md), [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md)

@@ -31,6 +31,7 @@ import { topicsRouter } from "../../src/routes/topics";
 import { sourcesRouter } from "../../src/routes/sources";
 import { skillsRouter } from "../../src/routes/skills";
 import { projectsRouter } from "../../src/routes/projects";
+import { buildRouter } from "../../src/routes/build";
 import { askRouter } from "../../src/routes/ask";
 import { designRouter } from "../../src/routes/design";
 import { plansRouter } from "../../src/routes/plans";
@@ -82,6 +83,7 @@ export function buildApp(): express.Express {
   app.use(sourcesRouter);
   app.use(skillsRouter);
   app.use(projectsRouter);
+  app.use(buildRouter);
   app.use(askRouter);
   app.use(designRouter);
   app.use(plansRouter);

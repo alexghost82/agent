@@ -199,8 +199,174 @@ Minimum iOS API surface:
 
 ---
 
+---
+
+# CONTRACT v2 — Product completion (learn → remember → skill → BUILD)
+
+> **Status:** FROZEN. Version `2.0.0`. Owner: **Architect**.
+> v2 adds the seams required to close the core product gap: the agent must
+> actually **develop** (generate real project files) from a plan, study resources
+> **deeply**, scale memory, and **learn from its own outcomes**. These interfaces
+> are stable so the mission agents (A2–A11) can work without blocking each other.
+> Everything in v1 (§1–§9) remains in force and unchanged.
+
+## v2.1 Vector search interface (owner: A4 — `functions/src/memory.ts`)
+
+The `VectorIndex` seam already exists and **must not change shape**:
+
+```ts
+interface SearchScope { userId: string; topicId?: string; projectId?: string }
+interface ScoredChunk {
+  id: string; sourceUrl?: string; sourcePath?: string; title?: string;
+  content: string; chunkType?: string; scope?: string; score: number;
+}
+interface VectorIndex {
+  search(query: string, scope: SearchScope, limit: number): Promise<ScoredChunk[]>;
+}
+export function searchMemory(query: string, scope: SearchScope, limit?: number): Promise<ScoredChunk[]>;
+```
+
+Invariants (frozen):
+
+- **`userId` scope is mandatory** on every search and every read of
+  `knowledge_chunks`. `topicId`/`projectId` only narrow further.
+- Callers depend on `searchMemory(query, scope, limit)` and **must not** know
+  whether the backing store is in-process cosine (current) or Firestore
+  `findNearest` (ADR-0001 target). A4 may swap the implementation **behind this
+  interface only**.
+- The `VECTOR_CANDIDATE_CAP` env (default `1500`) governs the in-memory fallback
+  only. When `findNearest` lands, recall is no longer bounded by this cap; the
+  cap var stays read for the fallback path. A4 owns `firestore.indexes.json`
+  vector field overrides via Architect.
+- `knowledge_chunks` document shape is frozen for writers (ingest, learn, build
+  feedback): `{ userId, scope: "topic"|"project"|"build", topicId?, projectId?,
+  sourceUrl?, sourcePath?, title, content, embedding: number[], chunkType,
+  confidence, contentHash?, createdAt }`. `contentHash` (sha256 of normalized
+  content) is the **dedup key** (A3): writers skip a chunk whose
+  `(userId, scope, topicId|projectId, contentHash)` already exists.
+
+## v2.2 Build / execution contract (owner: A2 — `functions/src/build.ts`, `functions/src/routes/build.ts`)
+
+The agent **generates real files** into an isolated Firestore-backed workspace.
+It is a sandbox: artifacts live only in Firestore under the owner's `userId` and
+are downloaded client-side (`app/zip.ts`). **It NEVER writes to GitHub** and never
+mutates any external repo; GitHub ingest stays strictly read-only (v1).
+
+### Collections (Architect owns indexes)
+
+`build_runs/{id}`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `userId` | string | Owner. Mandatory isolation key. |
+| `projectId` | string | Owning project (must be owned by `userId`). |
+| `projectName` | string | Denormalized for listing. |
+| `planId` | string \| null | Source `generated_plans` doc (owned), if any. |
+| `instructions` | string \| null | Extra build instructions. |
+| `status` | `"running" \| "ready" \| "error"` | Lifecycle. |
+| `fileCount` | number | Number of artifacts produced. |
+| `summary` | string | Short human summary of what was built. |
+| `errorCode` | string \| null | Stable error code when `status==="error"`. |
+| `createdAt` / `updatedAt` | Timestamp | |
+
+`build_artifacts/{id}`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `userId` | string | Owner. Mandatory isolation key. |
+| `buildRunId` | string | Parent run. |
+| `projectId` | string | Denormalized. |
+| `path` | string | Relative file path (no leading `/`, no `..`). |
+| `content` | string | File contents (text). |
+| `language` | string \| null | Best-effort language tag from extension. |
+| `bytes` | number | `content` byte length. |
+| `createdAt` | Timestamp | |
+
+### Endpoints (all under `requireAuth`, error envelope §1)
+
+| Method | Path | Body / Query | Returns |
+|---|---|---|---|
+| `POST` | `/projects/:id/build` | `{ planId?, instructions?, lang? }` | `{ id, status, files: [{path,content}], summary, fileCount }` |
+| `GET` | `/builds?projectId=<id>` | — | `{ runs: BuildRun[] }` (scoped, newest first) |
+| `GET` | `/builds/:id` | — | `{ run: BuildRun, artifacts: BuildArtifact[] }` (owned) |
+
+Rules (frozen):
+
+- Ownership: `:id` project and any `planId` must belong to the caller, else
+  `404 not_found` (never leak existence).
+- Rate limit: `rateLimit("build", 6, 60_000)` (expensive, multi-file LLM).
+- `no_api_key` (400) when no usable AI key, exactly like design/plan.
+- Artifact `path` is sanitized: leading slashes stripped, `..` segments rejected,
+  capped count (`BUILD_MAX_FILES`, default 40) and per-file size
+  (`BUILD_MAX_FILE_BYTES`, default 100_000).
+- Generated artifacts are surfaced for **review/download only**; nothing is
+  applied to any user repo. Frontend (A7) downloads via `app/zip.ts`.
+
+## v2.3 Skill schema v2 (owner: A4 — `functions/src/routes/skills.ts`, `schemas.ts`)
+
+`agent_skills/{id}` superset (backward compatible — old docs still valid):
+
+| Field | Type | Notes |
+|---|---|---|
+| `skillName` / `description` / `example` | string | v1 fields (kept). |
+| `appliesTo` | string[] | Tags/stacks the skill applies to (e.g. `["nextjs","firestore"]`). |
+| `template` | string \| null | Reusable, parameterizable snippet/pattern the build step can apply. |
+| `version` | number | Schema/content version; defaults `1` for legacy. |
+| `quality` | `{ score: number; rationale?: string }` \| null | Validation of the extracted skill. |
+| `memoryType` | `"procedural"` | Unchanged. |
+
+Extraction (A4) draws from the **whole topic** (not a fixed 16-chunk slice) and
+records `version`/`appliesTo`/`template`/`quality`. Build (A2) and design/plan
+read `template`/`appliesTo` to actually influence generation.
+
+## v2.4 Self-learning loop (owner: A3 — `functions/src/learn.ts` / feedback writer)
+
+Outcomes of design/plan/build are written back into memory as new
+`knowledge_chunks` with `scope:"build"` (or `"project"`), `chunkType` one of
+`"design_outcome" | "plan_outcome" | "build_outcome"`, the same dedup
+(`contentHash`) and `userId`/`projectId` scoping. This is **additive**: a failed
+or low-value outcome may be skipped, but a stored outcome is retrievable by
+`searchMemory` for subsequent design/plan/build calls. No write crosses tenants.
+
+## v2.5 Deep ingest (owner: A3 — `functions/src/ssrf.ts`, `routes/sources.ts`)
+
+`/learn` may study a resource **deeply** within strict bounds:
+
+- Domain-bounded crawl: same-origin only, follows `sitemap.xml` + in-page links,
+  capped by `INGEST_MAX_PAGES` (default 20) and `INGEST_MAX_DEPTH` (default 2).
+- PDF extraction supported; optional headless render is behind a flag and
+  off by default.
+- Per-page byte cap stays finite (raise the current 160k cautiously); total work
+  bounded by page count × per-page cap.
+- Dedup by `contentHash` so re-`/learn` of the same URL does not duplicate chunks.
+- SSRF guards (private-IP/redirect checks) from v1 apply to **every** fetched URL.
+
+## v2.6 Updated ownership (supersedes §8 for new files)
+
+| File / zone | Owner |
+|---|---|
+| `functions/src/build.ts`, `functions/src/routes/build.ts` | A2 (Backend) |
+| `functions/src/memory.ts` | A4 (Backend) |
+| `functions/src/ssrf.ts`, `functions/src/learn.ts`, `routes/sources.ts` | A3 (Backend) |
+| `functions/src/routes/skills.ts` | A4 (Backend) |
+| `functions/src/github.ts`, async ingest queue, `scripts/**` | A5 (Backend/Ops) |
+| security middleware, `routes/session.ts`, CSP | A6 (Backend) |
+| `functions/src/providers/**` | A9 (Backend) |
+| `app/**` | A7 (Frontend) |
+| `ios/**` | A10 (iOS) |
+| `functions/test/**`, `.github/workflows/ci.yml` | A11 (QA) |
+| `firestore.indexes.json`, `firestore.rules`, `docs/**`, root `*.md` | Architect (A8 executes doc content) |
+
+Backend agents touching `functions/src/index.ts` (router wiring) and
+`functions/src/schemas.ts` coordinate through the Architect: append-only, one
+router/schema block per agent, never reorder existing wiring.
+
 ## Changelog
 
+- `2.0.0` — v2 contracts: vector interface invariants + `contentHash` dedup,
+  build/execution model (`build_runs`/`build_artifacts` + endpoints, sandbox =
+  Firestore workspace, never writes GitHub), skill schema v2, self-learning loop,
+  deep ingest bounds, updated ownership for new files.
 - `1.1.0` — Add iOS client contract, bundle id, Firebase config workflow, and
   mobile API expectations.
 - `1.0.0` — Initial freeze of §1 (error envelope, session model, health/readiness,

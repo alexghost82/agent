@@ -1,62 +1,94 @@
-# План тестирования админ-панели мониторинга OpenAI API токенов и биллинга
+# TESTING.md — Test Setup
 
-## Цели тестирования
+Testing centers on the backend (`functions/`), with a type-check gate on the web
+client. The test runner is **vitest**; integration suites run against the
+**Firestore emulator** and self-skip when it is unavailable.
 
-- Проверить корректность подсчёта и логирования токенов.
-- Убедиться в правильной работе API админ-панели с фильтрами, пагинацией и сортировкой.
-- Проверить безопасность доступа к админ-эндпоинтам.
-- Проверить корректность отображения данных в UI.
-- Проверить работу фильтров, графиков и экспорта данных.
+## Layout
 
-## Виды тестов
+```text
+functions/
+  vitest.config.ts          # node env; include: test/**/*.test.ts
+  test/
+    crypto.test.ts          # unit: AES-256-GCM round-trip / tamper / wrong-secret
+    keys.test.ts            # unit: per-user provider key envelope + validation
+    pure.test.ts            # unit: pure helpers (chunking, cosine, etc.)
+    ssrf.test.ts            # unit: SSRF guard (private/loopback/metadata ranges)
+    helpers/
+      env.ts                # test env setup
+      harness.ts            # startServer/seedUser/expectError, EMULATOR_AVAILABLE
+    integration/            # emulator-gated (describe.skipIf(!EMULATOR_AVAILABLE))
+      ask.test.ts  dashboard.test.ts  design.test.ts  lang.test.ts
+      plans.test.ts  projects.test.ts  public.test.ts  security.test.ts
+      skills.test.ts  sources.test.ts  topics.test.ts
+```
 
-### Backend
+## Test tiers
 
-- **Юнит-тесты:**
-  - Подсчёт токенов из ответов OpenAI API.
-  - Запись и чтение `UsageRecord` и `BillingRecord`.
-  - Проверка работы dependency для проверки прав администратора.
-  - Тесты API эндпоинтов с разными параметрами.
+### Unit tests (run anywhere, no emulator)
 
-- **Интеграционные тесты:**
-  - Взаимодействие подсчёта токенов с API.
-  - Проверка пагинации и фильтрации.
-  - Тестирование безопасности (доступ только для админов).
+Pure / crypto / SSRF logic that needs no Firestore:
 
-### Frontend
+- `crypto.test.ts` — encrypt/decrypt round-trip, auth-tag tamper rejection,
+  wrong-secret failure.
+- `keys.test.ts` — provider key envelope storage, prefix validation, length
+  bounds.
+- `pure.test.ts` — deterministic helpers.
+- `ssrf.test.ts` — private/loopback/link-local and cloud-metadata host
+  rejection, DNS checks.
 
-- **UI тесты:**
-  - Отображение таблиц и графиков.
-  - Работа фильтров и сортировки.
-  - Проверка маршрутизации и защиты маршрута `/admin`.
+### Integration tests (Firestore emulator)
 
-- **Интеграционные тесты:**
-  - Взаимодействие с backend API.
-  - Обработка ошибок и пустых данных.
+Each router has an integration suite under `test/integration/**`. They:
 
-## Тестовые сценарии
+- start the Express app via the harness and seed owner/other users;
+- assert auth (`401`), validation (`400`), ownership/isolation (`404`, no
+  cross-tenant leakage), and rate limits (`429`);
+- drive AI paths up to the deterministic `no_api_key` boundary (no network);
+- assert the stable error envelope `{ error, requestId }` (contract §1).
 
-1. Пользователь с ролью админа входит в админ-панель.
-2. Загружает список пользователей с их статистикой.
-3. Применяет фильтры по дате и пользователям.
-4. Просматривает детальную статистику по конкретному пользователю.
-5. Изменяет тариф и проверяет обновление.
-6. Пытается получить доступ к админ-панели обычный пользователь — доступ запрещён.
-7. Проверяет экспорт данных в CSV/JSON.
-8. Проверяет корректность подсчёта токенов при вызове OpenAI API.
+The suites are gated with `describe.skipIf(!EMULATOR_AVAILABLE)`, and
+`security.test.ts` additionally uses runtime capability **probes** so individual
+checks auto-activate as the backend ships features (and skip — never hard-fail —
+otherwise).
 
-## Инструменты
+## Running tests
 
-- Backend: pytest, HTTPX для тестирования API.
-- Frontend: React Testing Library, Jest.
+```bash
+# Web client type-check (repo root)
+npm run typecheck
 
-## Критерии успешного тестирования
+# Backend build + tests
+cd functions
+npm run build
+npm test          # unit always runs; integration self-skips without the emulator
 
-- Все тесты проходят без ошибок.
-- Нет утечек доступа к админ-данным.
-- UI корректно отображает данные и реагирует на действия.
-- Производительность API соответствует требованиям.
+# Integration with the Firestore emulator (mirrors CI)
+KEYS_ENC_SECRET=local-test-secret \
+  npx firebase emulators:exec --only firestore --project demo-ghost "npx vitest run"
+```
 
----
+## CI (`.github/workflows/ci.yml`)
 
-Регулярное тестирование и мониторинг помогут поддерживать качество и безопасность системы.
+Three jobs:
+
+1. **checks** — install deps, `npm run typecheck` (Next.js), a pending-friendly
+   frontend lint step, `cd functions && npm run build`, then `npm test`
+   (unit; integration suites self-skip without the emulator).
+2. **integration** — sets up Java + the Firestore emulator, installs
+   `firebase-tools` and `@vitest/coverage-v8` (not persisted to
+   `package.json`), and runs the integration suite under
+   `firebase emulators:exec` with a **coverage gate** (thresholds: lines 65,
+   statements 65, functions 75, branches 60; excludes `index.ts`, `providers/**`,
+   `github.ts`, `concurrency.ts`).
+3. **secret-scan** — greps the tree for obvious committed secrets (OpenAI,
+   GitHub PAT, AWS, private keys), excluding `*.example` and lockfiles.
+
+## Conventions
+
+- Tests are deterministic and offline: no real network or AI calls; AI paths stop
+  at the `no_api_key` boundary.
+- Cross-tenant isolation is asserted explicitly (user A must never see user B's
+  data).
+- New backend behavior should ship with matching unit and/or integration tests
+  under `functions/test/**` (QA-owned per `docs/CONTRACT.md` §8/§v2.6).

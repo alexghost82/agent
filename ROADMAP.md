@@ -1,76 +1,91 @@
 # ROADMAP.md — Improvement Roadmap
 
-Priority: P0 (now) · P1 (next) · P2 (later). Effort in ideal engineer-hours.
+Priority: P0 (now) · P1 (next) · P2 (later). Effort in ideal engineer-hours/days.
+Evidence in `path:line`. See `docs/CONTRACT.md` for the frozen v2 seams.
 
-## Quick Wins (P0, < 1 day each)
-1. **Encrypt `githubToken`** with existing `crypto.ts`. ~2h. `projects.ts:79,99`.
-2. **Rate-limit `/login`** (per username + IP). ~2h. `public.ts:14`, `ratelimit.ts`.
-3. **Add `.max()` bounds** to all zod schemas. ~3h. `schemas.ts`.
-4. **Seed users once** (remove per-login `ensureSeedUsers`). ~2h. `public.ts:17`.
-5. **Pin root dependencies** to explicit versions. ~1h. `package.json`.
-6. **Require explicit CORS allow-list** in prod. ~1h. `index.ts:42-47`.
-7. **Generic client error messages** + server log. ~3h.
-8. **LRU cap** on provider client caches. ~1h. `providers/*`.
+## Completed (verified in code)
 
-## Session & auth hardening (P0–P1)
-9. **Session `expiresAt` + check** in `requireAuth`; rotate on login. ~4h.
-10. **Server-side logout** endpoint clearing `sessionToken`. ~2h.
-11. **Hash stored session tokens** (store hash, compare hash). ~3h.
-12. **Log decrypt failures**; decide fail-closed for user calls. ~2h. `ai.ts:33-39`.
+- Encrypt `githubToken` with `crypto.ts` (`routes/projects.ts:96`).
+- Rate-limit `/login` (per username + IP) (`ratelimit.ts loginThrottle`).
+- `.max()` bounds on all zod schemas (`schemas.ts`).
+- Seed users once per instance (`auth.ts ensureSeedUsersOnce`).
+- Pin root dependencies to explicit versions (`package.json`).
+- Require explicit CORS allow-list in production (`index.ts:47-55`).
+- Generic client errors + server log via coded envelope (`errors.ts`).
+- LRU cap on provider client caches (`lru.ts`, `providers/*`).
+- Session `expiresAt` + check, rotate on login, hashed stored token, server-side
+  `/logout` (`auth.ts`, `routes/public.ts`, `routes/session.ts`).
+- Log decrypt failures (no longer silent) (`ai.ts:46-54`).
+- Batch embedding API calls (`ai.ts embeddingBatch`).
+- Maintain counter docs for the dashboard (`stats.ts`).
+- Firestore composite indexes + `orderBy().limit()` listing (`listing.ts`,
+  `firestore.indexes.json`).
+- TTL field on `agent_logs` (`util.ts expireAt`).
+- Structured logging with request/correlation ids (`log.ts`, `errors.ts`).
+- Health/readiness incl. AI + Firestore probes (`routes/public.ts`).
+- Function memory / timeout / concurrency tuning (`index.ts:104-107`).
+- Integration tests per router + auth/isolation coverage + CI coverage gate
+  (`functions/test/integration/**`, `.github/workflows/ci.yml`).
+- Split the frontend into per-panel components + a data hook
+  (`app/components/**`, `app/useGhostData.ts`).
+- Plan/artifact export as a zip client-side (`app/zip.ts`).
 
-## Scalability (P1)
-13. **Replace in-memory cosine with a vector index** (Firestore Vector Search or external). ~3–5d. `memory.ts`.
-14. **Async GitHub ingestion** via Cloud Tasks/Pub-Sub with progress + retries. ~3–4d. `github.ts`, `projects.ts`.
-15. **Parallelize file fetches** (bounded concurrency) in ingestion. ~1d.
-16. **Batch embedding API calls**. ~1d. `sources.ts`, `github.ts`.
-17. **Maintain counter docs** for dashboard instead of `count()` per load. ~1d.
-18. **Add Firestore indexes + `orderBy().limit()`**, drop in-memory sorts. ~1d.
-19. **TTL policy on `agent_logs`**. ~2h.
-20. **Distributed rate limiting** (Firestore/Redis) for AI endpoints. ~1–2d.
+## P0 — Product completion (CONTRACT v2)
 
-## Testing & reliability (P1)
-21. **Integration tests** against the Firestore emulator for each router. ~3d.
-22. **Auth/isolation tests** (user A cannot access user B). ~1d. (`test/keys.test.ts:273-275` todos).
-23. **Route tests for `/ask`, `/design`, `/plan`, `/learn`** incl. error paths. ~2d.
-24. **Enable the `it.todo` over-sized-key test** after S6 fix. ~1h.
-25. **CI: run frontend lint + add coverage gate**. ~3h. `.github/workflows/ci.yml`.
+1. **BUILD mode** — service + endpoints landed (`build.ts runBuild`,
+   `routes/build.ts`: `POST /projects/:id/build`, `GET /builds`,
+   `GET /builds/:id`; `build_runs`/`build_artifacts`; `BUILD_MAX_FILES` /
+   `BUILD_MAX_FILE_BYTES`; never writes GitHub — CONTRACT §v2.2). Remaining:
+   end-to-end verification, frontend wiring, and review/download polish. ~1–2d.
+2. **Self-learning loop** — persist design/plan/build outcomes back into memory
+   as `knowledge_chunks` (`build`/`project` scope) with `contentHash` dedup.
+   ~2–3d. (CONTRACT §v2.4)
+3. **Skill schema v2** — `appliesTo`/`template`/`version`/`quality`, extracted
+   from the whole topic and consumed by design/plan/build. ~2–3d. (CONTRACT
+   §v2.3)
+4. **Deep ingest** — domain-bounded crawl (sitemap + same-origin links), PDF
+   extraction, `contentHash` dedup, within `INGEST_MAX_*` bounds. ~3–4d.
+   (CONTRACT §v2.5)
 
-## Observability / DevOps (P1–P2)
-26. **Structured logging** with request/correlation ids. ~1d.
-27. **Error tracking** (Sentry/Cloud Error Reporting). ~0.5d.
-28. **Health/readiness incl. AI + Firestore probes**. ~0.5d. (`public.ts:10`).
-29. **Function min-instances / concurrency tuning** to cut cold starts. ~0.5d.
-30. **Backups / export schedule** for Firestore. ~0.5d.
+## P1 — Scale & hardening
 
-## Product / UX (P1–P2)
-31. **Stream LLM responses** (ask/design/plan) for perceived speed. ~2d.
-32. **Markdown rendering** of answers/plans (currently `<pre>`/plain text). ~1d. `app/page.tsx:482-491,1004`.
-33. **Source/skill/project delete + edit** (only create/patch exist today). ~2d.
-34. **Re-learn / refresh source** & dedupe of chunks. ~1d.
-35. **Plan export as a zip** of all md files. ~0.5d.
-36. **Project ingest progress UI** (depends on #14). ~1d.
-37. **Pagination** for sources/skills/projects/logs. ~1d.
-38. **Empty-state onboarding** wizard for first-time users. ~1d.
-39. **Bulk skill selection** + skill search in project view. ~0.5d.
-40. **Copy-all prompts** button. ~0.5d.
+5. **Replace in-memory cosine with a vector index** (Firestore `findNearest` /
+   external) behind the `VectorIndex` interface. ~3–5d. `memory.ts`. (ADR-0001)
+6. **Async GitHub ingestion** via Cloud Tasks/Pub-Sub with progress + retries;
+   parallelize file fetches with bounded concurrency. ~4–5d. `github.ts`,
+   `routes/projects.ts`.
+7. **Distributed rate limiting** for expensive AI endpoints (reuse
+   `consumeDistributed`). ~1d. `ratelimit.ts`.
+8. **Move the session token off `localStorage`** (httpOnly cookie or short-lived
+   token + strict CSP). ~2–3d. `app/api.ts`.
+9. **Require a CORS allow-list in internet-exposed non-prod** environments. ~0.5d.
 
-## Monetization / growth (P2)
-41. **Usage metering per user** (tokens, ingests) → billing tiers. ~3d.
-42. **Team/workspace sharing** of topics/skills. ~1w.
-43. **Template library** of starter topics/skills. ~2d.
-44. **More providers** (Anthropic, Azure OpenAI) via existing contract. ~2d each.
-45. **Public read-only share links** for generated plans. ~2d.
+## P1–P2 — Observability / DevOps
 
-## Code quality (P2)
-46. **Extract shared "list+sort+scope" helper** across routers. ~0.5d.
-47. **Split `app/page.tsx`** into per-step components + a data hook. ~2d.
-48. **Remove `any`** in `ai.ts`/route catch blocks; typed errors. ~1d.
-49. **Shared typed Firestore converters** for collections. ~1d.
-50. **Document env + runbook** in README (deploy, emulators, secrets). ~0.5d.
+10. Error tracking (Sentry / Cloud Error Reporting). ~0.5d.
+11. Backups / export schedule for Firestore. ~0.5d.
+12. Deploy-time index/TTL provisioning checks. ~0.5d.
+
+## P2 — Product / UX
+
+13. Stream LLM responses (ask/design/plan/build) for perceived speed. ~2d.
+14. Source/skill/project delete + edit (only create/patch today). ~2d.
+15. Re-learn / refresh source with chunk dedup (ties into deep ingest). ~1d.
+16. Project ingest progress UI (depends on async ingestion). ~1d.
+17. Pagination for sources/skills/projects/logs. ~1d.
+
+## P2 — Growth
+
+18. Usage metering per user (tokens, ingests) → billing tiers. ~3d.
+19. Team/workspace sharing of topics/skills. ~1w.
+20. More providers (Anthropic, Azure OpenAI) via the existing provider contract.
+    ~2d each.
 
 ---
 
 ### Suggested sequencing
-- **Sprint 1 (P0):** 1–8, 9–11 — security & auth hardening + quick wins.
-- **Sprint 2 (P1):** 13, 14, 16, 18, 21–23 — scale + test foundation.
-- **Sprint 3 (P1/P2):** observability (26–30), UX (31–34), then product/monetization.
+- **Sprint 1 (P0):** 1–4 — close the core product gap (BUILD + self-learning +
+  skills v2 + deep ingest).
+- **Sprint 2 (P1):** 5–9 — vector index, async ingest, and remaining security
+  hardening.
+- **Sprint 3 (P1/P2):** observability (10–12), then UX/growth.

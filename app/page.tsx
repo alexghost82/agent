@@ -13,6 +13,7 @@ import { ProjectsPanel } from "./components/panels/ProjectsPanel";
 import { AskPanel } from "./components/panels/AskPanel";
 import { DesignPanel } from "./components/panels/DesignPanel";
 import { PlanPanel } from "./components/panels/PlanPanel";
+import { BuildPanel } from "./components/panels/BuildPanel";
 import { SettingsPanel } from "./components/panels/SettingsPanel";
 
 export default function Home() {
@@ -49,6 +50,7 @@ export default function Home() {
         {active === "ask" && <AskPanel g={g} />}
         {active === "design" && <DesignPanel g={g} />}
         {active === "plan" && <PlanPanel g={g} />}
+        {active === "build" && <BuildPanel g={g} />}
         {active === "settings" && <SettingsPanel g={g} />}
       </main>
     </div>

@@ -1,70 +1,32 @@
-# Архитектура решения: Админ-панель мониторинга и биллинга
+# Architecture
 
-## Backend
+The canonical architecture document for GHOST Agent Builder 2.0 lives at
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Please read it there to avoid
+drift — this file is only a short pointer and summary.
 
-### Основные компоненты
+## Summary
 
-- **Модели данных:**
-  - `UsageRecord` — хранит данные о количестве использованных токенов, дате, пользователе, стоимости.
-  - `BillingRecord` — агрегированные данные по биллингу за период.
-  - Расширение модели `User` с флагом `is_admin` для разграничения доступа.
+- **Frontend:** Next.js static export (`output: "export"`, `app/`) served by
+  Firebase Hosting. `/api/**` is rewritten to the `api` Cloud Function.
+- **Backend:** one Express app (Node 22) exported as the `api` Gen2 HTTPS
+  function (`functions/src/index.ts`), with one router per area under
+  `functions/src/routes/*` and shared modules (`auth`, `memory`, `ai`, `crypto`,
+  `ratelimit`, `errors`, `ssrf`, `github`, `stats`, `listing`).
+- **Storage:** Firestore via the Admin SDK only; client rules are deny-all
+  (`firestore.rules`). Composite indexes live in `firestore.indexes.json`.
+- **Multi-tenancy:** every document carries `userId`; all reads are owner-scoped.
+  Bearer session tokens are validated per request (only the token hash is stored,
+  with a hard expiry).
+- **AI providers:** pluggable OpenAI / Gemini. Each user can bring their own key
+  (encrypted at rest, AES-256-GCM via `KEYS_ENC_SECRET`); the server env key is a
+  fallback. Calls fail with `no_api_key` when neither is available.
+- **Safety:** GitHub access is GET-only; BUILD artifacts are written only into
+  the owner's Firestore workspace and downloaded client-side — never pushed to
+  any external repo.
 
-- **Логика подсчёта токенов:**
-  - В `llm.py` при каждом вызове OpenAI API извлекать из ответа количество использованных токенов.
-  - Записывать данные в `UsageRecord` с привязкой к пользователю и времени.
+## Related documents
 
-- **API:**
-  - Новый роутер `/api/admin` с эндпоинтами:
-    - Пользователи: CRUD операции, получение статистики.
-    - Usage: получение данных по токенам с фильтрами по дате и пользователям.
-    - Billing: получение отчетов по расходам.
-  - Пагинация, сортировка, фильтрация.
-  - Авторизация и проверка прав администратора.
-
-- **Безопасность:**
-  - Dependency для проверки прав администратора.
-  - Защита всех админ-эндпоинтов.
-
-- **База данных:**
-  - Миграции для добавления новых таблиц и полей.
-  - Использование SQLite с ORM SQLAlchemy.
-
-## Frontend
-
-### Основные компоненты
-
-- **Админ-панель:**
-  - Новый раздел `/admin` с React-компонентами:
-    - Таблица пользователей с фильтрами и поиском.
-    - Графики использования токенов и биллинга (например, Recharts).
-    - Детальный просмотр статистики по пользователю.
-    - Настройки тарифа (цена за 1000 токенов).
-  - Управление состоянием через Zustand.
-  - Вызовы новых API через расширенный `api.ts`.
-
-- **Безопасность:**
-  - Проверка роли администратора на frontend.
-  - Скрытие админского меню для обычных пользователей.
-
-- **UX:**
-  - Фильтры по дате, пользователям.
-  - Экспорт данных в CSV/JSON.
-  - Подтверждения для критичных операций.
-
-## Взаимодействие компонентов
-
-1. Пользователь с ролью админа заходит в админ-панель.
-2. Frontend запрашивает статистику и биллинг через API.
-3. Backend проверяет права, возвращает данные из базы.
-4. При вызове OpenAI API backend логирует использование токенов.
-5. Админ может фильтровать, сортировать и экспортировать данные.
-
-## Риски и меры
-
-- Нагрузка на базу при логировании каждого запроса — использовать агрегирование и индексацию.
-- Безопасность — строгая проверка прав.
-- Совместимость — новые таблицы и API не влияют на существующий функционал.
-
----
-
-Данная архитектура обеспечивает модульность, безопасность и расширяемость проекта.
+- Frozen integration contract (v2): [`docs/CONTRACT.md`](docs/CONTRACT.md)
+- HTTP API: [`docs/API.md`](docs/API.md)
+- Architecture findings & report: [`ARCHITECTURE_REPORT.md`](ARCHITECTURE_REPORT.md)
+- ADRs: [`docs/adr`](docs/adr)

@@ -147,6 +147,12 @@ export function Icon({ name }: { name: string }) {
       <>
         <polyline points="20 6 9 17 4 12" />
       </>
+    ),
+    build: (
+      <>
+        <path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6.4 6.4a1.5 1.5 0 0 0 2.1 2.1l6.4-6.4a4 4 0 0 0 5.6-5.6l-2.7 2.7-2.1-2.1z" />
+        <path d="M14 14l6 6" />
+      </>
     )
   };
   return (

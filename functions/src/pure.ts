@@ -82,3 +82,81 @@ export function isTextFile(path: string): boolean {
   const ext = lower.slice(dot + 1);
   return TEXT_EXTENSIONS.has(ext);
 }
+
+// --- Build (real development) helpers (CONTRACT v2.2) ----------------------
+
+const EXT_LANGUAGE: Record<string, string> = {
+  ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+  mjs: "javascript", cjs: "javascript", json: "json", md: "markdown",
+  mdx: "markdown", py: "python", rb: "ruby", go: "go", rs: "rust",
+  java: "java", kt: "kotlin", swift: "swift", c: "c", h: "c", cpp: "cpp",
+  hpp: "cpp", cc: "cpp", cs: "csharp", php: "php", sh: "shell", bash: "shell",
+  zsh: "shell", sql: "sql", html: "html", htm: "html", css: "css",
+  scss: "scss", less: "less", vue: "vue", svelte: "svelte", toml: "toml",
+  yml: "yaml", yaml: "yaml", xml: "xml", gradle: "gradle", graphql: "graphql",
+  prisma: "prisma", dockerfile: "dockerfile"
+};
+
+// Best-effort language tag from a file path's extension (or known filename).
+export function detectLanguage(path: string): string | null {
+  const name = (path.split("/").pop() || "").toLowerCase();
+  if (name === "dockerfile") return "dockerfile";
+  if (name === "makefile") return "makefile";
+  const dot = name.lastIndexOf(".");
+  if (dot === -1) return null;
+  return EXT_LANGUAGE[name.slice(dot + 1)] ?? null;
+}
+
+// Normalize a model-proposed artifact path into a safe relative path, or null
+// if it is unsafe/unusable. Rejects absolute paths, `..` traversal, NUL bytes,
+// and empty results. Backslashes are normalized to forward slashes.
+export function sanitizeArtifactPath(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  if (input.includes("\0")) return null;
+  let p = input.trim().replace(/\\/g, "/");
+  // Drop leading slashes and any leading "./" segments.
+  p = p.replace(/^\/+/, "");
+  const segments = p.split("/").filter((s) => s !== "" && s !== ".");
+  if (!segments.length) return null;
+  if (segments.some((s) => s === "..")) return null;
+  const joined = segments.join("/");
+  if (joined.length === 0 || joined.length > 1024) return null;
+  return joined;
+}
+
+export interface BuildFile {
+  path: string;
+  content: string;
+  language: string | null;
+  bytes: number;
+}
+
+// Truncate `content` to at most `maxBytes` UTF-8 bytes.
+function truncateUtf8(content: string, maxBytes: number): string {
+  const buf = Buffer.from(content, "utf8");
+  if (buf.length <= maxBytes) return content;
+  return buf.subarray(0, maxBytes).toString("utf8");
+}
+
+// Validate + sanitize a raw `{path, content}[]` proposal from the model into
+// safe, de-duplicated, bounded BuildFile records (CONTRACT v2.2).
+export function normalizeBuildFiles(
+  raw: unknown,
+  maxFiles: number,
+  maxFileBytes: number
+): BuildFile[] {
+  if (!Array.isArray(raw)) return [];
+  const out: BuildFile[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (out.length >= maxFiles) break;
+    const path = sanitizeArtifactPath((item as { path?: unknown })?.path);
+    const rawContent = (item as { content?: unknown })?.content;
+    if (!path || typeof rawContent !== "string") continue;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const content = truncateUtf8(rawContent, maxFileBytes);
+    out.push({ path, content, language: detectLanguage(path), bytes: Buffer.byteLength(content, "utf8") });
+  }
+  return out;
+}

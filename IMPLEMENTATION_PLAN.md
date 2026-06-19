@@ -1,77 +1,64 @@
-# План реализации: Админ-панель мониторинга OpenAI API токенов и биллинга
+# Implementation Plan — GHOST Agent Builder v2
 
-## 1. Подготовка
+Closing the gap between the product idea (learn → remember → skill → **build**,
+with a self-learning loop) and the current code. The frozen seams for every item
+below live in `docs/CONTRACT.md` (v2). Work is sequenced by file-zone ownership
+so parallel agents never edit the same files at once.
 
-- Обсудить и утвердить требования по биллингу и детализации статистики.
-- Спроектировать модели данных и API.
-- Создать миграции для новых таблиц.
+## Phase 0 — Architecture (done)
 
-## 2. Backend
+- Froze v2 contracts in `docs/CONTRACT.md`: vector interface invariants +
+  `contentHash` dedup, `build_runs`/`build_artifacts` model + endpoints, skill
+  schema v2, self-learning loop, deep-ingest bounds, ownership.
+- Added `build_runs` / `build_artifacts` composite indexes to
+  `firestore.indexes.json`.
 
-### 2.1 Модели данных
+## Phase 1 — Real development core (done)
 
-- Добавить модели `UsageRecord`, `BillingRecord`.
-- Расширить модель `User` флагом `is_admin`.
+- `functions/src/build.ts` + `functions/src/routes/build.ts`: `POST /projects/:id/build`,
+  `GET /builds`, `GET /builds/:id`. Generates real files from plan + skills +
+  memory into a Firestore-backed sandbox; **never writes to GitHub**.
+- `functions/src/pure.ts`: `sanitizeArtifactPath`, `detectLanguage`,
+  `normalizeBuildFiles` (path safety + count/byte caps).
+- Frontend Build step (`app/components/panels/BuildPanel.tsx`, `useGhostData.ts`,
+  i18n EN/HE/RU): start a build, review files, download `.zip`, browse past runs.
+- Tests: unit (pure helpers) + emulator integration (auth, ownership,
+  `no_api_key`, cross-tenant isolation).
 
-### 2.2 Логика подсчёта токенов
+## Phase 2 — Depth, scale, hardening (next wave, sequential on `functions/src/**`)
 
-- В `llm.py` при каждом вызове OpenAI API извлекать количество токенов.
-- Записывать данные в `UsageRecord`.
-- Обеспечить корректную обработку fallback на локальный LLM (не считать токены).
+1. **A4 — Memory & skills.** Move `memory.ts` to Firestore Vector Search
+   (`findNearest`) behind the existing `VectorIndex` interface, keeping the
+   in-memory cosine path as a tested fallback (emulator has no `findNearest`).
+   Skill schema v2 extraction over the whole topic; design/plan/build read
+   `template`/`appliesTo`.
+2. **A3 — Deep ingest & self-learning.** Domain-bounded crawl (sitemap +
+   same-origin links, page/depth caps), PDF support, `contentHash` dedup,
+   write design/plan/build outcomes back into memory.
+3. **A6 — Security.** Session token off `localStorage` (httpOnly cookie) or
+   hardened CSP; `consumeDistributed` on `/ask /design /plan /learn /build`;
+   security headers; user management; iOS ID-token verification.
+4. **A5 — Scale & ops.** Async GitHub ingest via a queue with progress/retries;
+   `scripts/` for seeding, TTL, backups; error tracking.
+5. **A9 — Providers.** Add Anthropic + Azure OpenAI behind `providers/types.ts`;
+   per-user usage accounting.
+6. **A10 — iOS parity.** skills/design/plan/build flows, server-verifiable token,
+   Keychain storage.
 
-### 2.3 API админ-панели
+## Phase 3 — QA / Integration
 
-- Создать роутер `admin.py` с эндпоинтами:
-  - `GET /api/admin/users-usage` — статистика по пользователям.
-  - `GET /api/admin/users-usage/{user_id}` — детальная статистика.
-  - `GET /api/admin/billing-rate` и `PUT /api/admin/billing-rate` — тарифы.
-  - CRUD для пользователей (расширение `users.py` или через `admin.py`).
-- Добавить пагинацию, фильтры, сортировку.
-- Добавить dependency для проверки прав администратора.
+- **A11.** End-to-end emulator test of the full path (deep learn → memory →
+  skills v2 → project → design → plan → BUILD → feedback into memory), tenant
+  isolation, limits, security. Frontend lint + coverage thresholds enforced in
+  `.github/workflows/ci.yml`. Final readiness report.
 
-### 2.4 Тестирование
+## Global Definition of Done
 
-- Написать юнит-тесты для подсчёта токенов и API.
-- Проверить безопасность доступа.
+1. Agent actually develops (generates files) from a plan — **closed in Phase 1**.
+2. Deep resource study (crawl/PDF) + self-learning loop work.
+3. Skills are applied; vector search is not bounded by the 1500 cap.
+4. Async ingest, backups, TTL, error tracking enabled.
+5. Security hardened; docs match code; CI green with the end-to-end test.
 
-## 3. Frontend
-
-### 3.1 API
-
-- Расширить `api.ts` новыми методами для админ-панели.
-
-### 3.2 Состояние
-
-- Добавить состояние и действия в `store.ts` для загрузки и управления данными админ-панели.
-
-### 3.3 UI
-
-- Создать компонент `AdminPanel.tsx` с:
-  - Таблицей пользователей и статистикой.
-  - Графиками использования токенов и биллинга.
-  - Фильтрами по дате и пользователям.
-  - Формой для настройки тарифа.
-- Добавить маршрут `/admin` с проверкой прав.
-- Добавить ссылку на админ-панель в сайдбар для администраторов.
-
-### 3.4 Тестирование
-
-- UI тесты и интеграционные тесты.
-- Проверка отображения данных и фильтров.
-
-## 4. Документация
-
-- Обновить README с описанием новой функциональности.
-- Добавить документацию по API админ-панели.
-- Создать руководство пользователя для администраторов.
-
-## 5. Релиз и мониторинг
-
-- Провести нагрузочное тестирование.
-- Проверить безопасность.
-- Развернуть на тестовом окружении.
-- Собрать обратную связь и исправить баги.
-
----
-
-Весь процесс должен проходить с сохранением текущего функционала и минимальными изменениями в существующем коде.
+All work preserves existing endpoints, the error envelope, and per-`userId`
+isolation, with minimal safe diffs.

@@ -6,7 +6,10 @@ import {
   safeJsonObject,
   parseRepoUrl,
   isTextFile,
-  tsMillis
+  tsMillis,
+  sanitizeArtifactPath,
+  detectLanguage,
+  normalizeBuildFiles
 } from "../src/pure";
 
 describe("chunkText", () => {
@@ -83,5 +86,63 @@ describe("tsMillis", () => {
     expect(tsMillis({ toMillis: () => 1234 })).toBe(1234);
     expect(tsMillis({ _seconds: 2 })).toBe(2000);
     expect(tsMillis(null)).toBe(0);
+  });
+});
+
+describe("sanitizeArtifactPath (build, CONTRACT v2.2)", () => {
+  it("normalizes safe relative paths", () => {
+    expect(sanitizeArtifactPath("src/index.ts")).toBe("src/index.ts");
+    expect(sanitizeArtifactPath("/leading/slash.txt")).toBe("leading/slash.txt");
+    expect(sanitizeArtifactPath("./a/./b.ts")).toBe("a/b.ts");
+    expect(sanitizeArtifactPath("a\\b\\c.ts")).toBe("a/b/c.ts");
+  });
+  it("rejects traversal, absolute escapes, NUL and non-strings", () => {
+    expect(sanitizeArtifactPath("../secret")).toBeNull();
+    expect(sanitizeArtifactPath("a/../../etc/passwd")).toBeNull();
+    expect(sanitizeArtifactPath("foo\0bar")).toBeNull();
+    expect(sanitizeArtifactPath("")).toBeNull();
+    expect(sanitizeArtifactPath("/")).toBeNull();
+    expect(sanitizeArtifactPath(42 as unknown as string)).toBeNull();
+  });
+});
+
+describe("detectLanguage (build)", () => {
+  it("maps known extensions and filenames", () => {
+    expect(detectLanguage("src/app.tsx")).toBe("typescript");
+    expect(detectLanguage("main.py")).toBe("python");
+    expect(detectLanguage("Dockerfile")).toBe("dockerfile");
+    expect(detectLanguage("README.md")).toBe("markdown");
+  });
+  it("returns null for unknown/extensionless", () => {
+    expect(detectLanguage("bin/app")).toBeNull();
+    expect(detectLanguage("logo.png")).toBeNull();
+  });
+});
+
+describe("normalizeBuildFiles (build, CONTRACT v2.2)", () => {
+  it("sanitizes, de-dupes, tags language and bytes", () => {
+    const files = normalizeBuildFiles(
+      [
+        { path: "/src/a.ts", content: "export const a = 1;" },
+        { path: "src/a.ts", content: "dup ignored" },
+        { path: "../evil.ts", content: "nope" },
+        { path: "docs/x.md", content: "hi" }
+      ],
+      40,
+      100_000
+    );
+    expect(files.map((f) => f.path)).toEqual(["src/a.ts", "docs/x.md"]);
+    expect(files[0].language).toBe("typescript");
+    expect(files[0].bytes).toBe(Buffer.byteLength("export const a = 1;", "utf8"));
+  });
+  it("enforces the file count cap and per-file byte cap", () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ path: `f${i}.txt`, content: "x".repeat(50) }));
+    const capped = normalizeBuildFiles(many, 3, 10);
+    expect(capped).toHaveLength(3);
+    expect(capped.every((f) => f.bytes <= 10)).toBe(true);
+  });
+  it("returns [] for non-array / invalid input", () => {
+    expect(normalizeBuildFiles(null, 40, 100_000)).toEqual([]);
+    expect(normalizeBuildFiles([{ path: 1, content: 2 }], 40, 100_000)).toEqual([]);
   });
 });

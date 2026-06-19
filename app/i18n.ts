@@ -1,7 +1,7 @@
 export type Lang = "en" | "he" | "ru";
 export type Theme = "dark" | "light";
 
-export const STEP_KEYS = ["overview", "sources", "skills", "projects", "ask", "design", "plan", "settings"] as const;
+export const STEP_KEYS = ["overview", "sources", "skills", "projects", "ask", "design", "plan", "build", "settings"] as const;
 export type StepKey = (typeof STEP_KEYS)[number];
 
 export const STEP_META: Record<StepKey, { n: string; icon: string }> = {
@@ -12,6 +12,7 @@ export const STEP_META: Record<StepKey, { n: string; icon: string }> = {
   ask: { n: "4", icon: "ask" },
   design: { n: "5", icon: "plan" },
   plan: { n: "6", icon: "generate" },
+  build: { n: "7", icon: "build" },
   settings: { n: "\u2022", icon: "key" }
 };
 
@@ -44,6 +45,7 @@ export const DICT: Record<Lang, any> = {
       ask: { title: "Ask memory", hint: "Ask about what the agent already learned" },
       design: { title: "Design Platform", hint: "Design an update for a selected project" },
       plan: { title: "Plan", hint: "Generate detailed md files and agent prompts" },
+      build: { title: "Build", hint: "Generate real project files from a plan and instructions" },
       settings: { title: "API Keys", hint: "Add your own OpenAI and Gemini keys and pick the active provider" }
     },
     sourcesExplain: "Create a topic, then add external links (GitHub or any website). The agent fetches each page, splits it into chunks, builds embeddings and stores them under the topic. Later it can turn this knowledge into skills.",
@@ -122,6 +124,19 @@ export const DICT: Record<Lang, any> = {
     copy: "Copy",
     copied: "Copied",
     noPlanYet: "No plan generated yet.",
+    buildExplain: "Select a project and let the agent generate real project files. Optionally base it on a generated plan and add free-text instructions. Files are produced for review and download only \u2014 nothing is written to your GitHub repo.",
+    selectPlanLabel: "Source plan (optional)",
+    planOptionNone: "No plan \u2014 use project understanding",
+    buildBtn: "Build project",
+    building: "Building\u2026",
+    buildSummary: "Summary",
+    downloadZipBtn: "Download .zip",
+    noBuildYet: "No build generated yet.",
+    pastBuilds: "Past builds",
+    openBuildBtn: "Open",
+    noBuildsYet: "No builds for this project yet.",
+    buildFilesCount: "files",
+    buildStatus: { running: "Running", ready: "Ready", error: "Error" },
     settingsExplain: "Add your own OpenAI and Gemini API keys, choose the active provider and test the connection. Your full key is never returned by the server \u2014 only the last 4 digits are shown.",
     activeProvider: "Active provider",
     activeProviderHint: "Used by the agent for designs, plans and answers.",
@@ -227,6 +242,7 @@ export const DICT: Record<Lang, any> = {
       ask: { title: "\u05e9\u05d0\u05dc\u05d4 \u05dc\u05d6\u05d9\u05db\u05e8\u05d5\u05df", hint: "\u05e9\u05d0\u05dc\u05d5 \u05e2\u05dc \u05de\u05d4 \u05e9\u05d4\u05e1\u05d5\u05db\u05df \u05db\u05d1\u05e8 \u05dc\u05de\u05d3" },
       design: { title: "\u05ea\u05db\u05e0\u05d5\u05df \u05e4\u05dc\u05d8\u05e4\u05d5\u05e8\u05de\u05d4", hint: "\u05ea\u05db\u05e0\u05e0\u05d5 \u05e2\u05d3\u05db\u05d5\u05df \u05dc\u05e4\u05e8\u05d5\u05d9\u05e7\u05d8 \u05e9\u05e0\u05d1\u05d7\u05e8" },
       plan: { title: "\u05ea\u05d5\u05db\u05e0\u05d9\u05ea", hint: "\u05e6\u05e8\u05d5 \u05e7\u05d1\u05e6\u05d9 md \u05de\u05e4\u05d5\u05e8\u05d8\u05d9\u05dd \u05d5\u05e4\u05e8\u05d5\u05de\u05e4\u05d8\u05d9\u05dd \u05dc\u05e1\u05d5\u05db\u05e0\u05d9\u05dd" },
+      build: { title: "\u05d1\u05e0\u05d9\u05d9\u05d4", hint: "\u05e6\u05e8\u05d5 \u05e7\u05d1\u05e6\u05d9 \u05e4\u05e8\u05d5\u05d9\u05e7\u05d8 \u05d0\u05de\u05d9\u05ea\u05d9\u05d9\u05dd \u05de\u05ea\u05d5\u05db\u05e0\u05d9\u05ea \u05d5\u05de\u05d4\u05e0\u05d7\u05d9\u05d5\u05ea" },
       settings: { title: "\u05de\u05e4\u05ea\u05d7\u05d5\u05ea API", hint: "\u05d4\u05d5\u05e1\u05d9\u05e4\u05d5 \u05de\u05e4\u05ea\u05d7\u05d5\u05ea OpenAI \u05d5-Gemini \u05de\u05e9\u05dc\u05db\u05dd \u05d5\u05d1\u05d7\u05e8\u05d5 \u05e1\u05e4\u05e7 \u05e4\u05e2\u05d9\u05dc" }
     },
     sourcesExplain: "\u05e6\u05e8\u05d5 \u05e0\u05d5\u05e9\u05d0, \u05d5\u05d0\u05d6 \u05d4\u05d5\u05e1\u05d9\u05e4\u05d5 \u05e7\u05d9\u05e9\u05d5\u05e8\u05d9\u05dd \u05d7\u05d9\u05e6\u05d5\u05e0\u05d9\u05d9\u05dd (GitHub \u05d0\u05d5 \u05db\u05dc \u05d0\u05ea\u05e8). \u05d4\u05e1\u05d5\u05db\u05df \u05d9\u05d5\u05e8\u05d9\u05d3 \u05db\u05dc \u05e2\u05de\u05d5\u05d3, \u05d9\u05d7\u05dc\u05e7 \u05dc\u05de\u05e7\u05d8\u05e2\u05d9\u05dd \u05d5\u05d9\u05e9\u05de\u05d5\u05e8 \u05ea\u05d7\u05ea \u05d4\u05e0\u05d5\u05e9\u05d0.",
@@ -305,6 +321,19 @@ export const DICT: Record<Lang, any> = {
     copy: "\u05d4\u05e2\u05ea\u05e7",
     copied: "\u05d4\u05d5\u05e2\u05ea\u05e7",
     noPlanYet: "\u05e2\u05d3\u05d9\u05d9\u05df \u05dc\u05d0 \u05e0\u05d5\u05e6\u05e8\u05d4 \u05ea\u05d5\u05db\u05e0\u05d9\u05ea.",
+    buildExplain: "\u05d1\u05d7\u05e8\u05d5 \u05e4\u05e8\u05d5\u05d9\u05e7\u05d8 \u05d5\u05ea\u05e0\u05d5 \u05dc\u05e1\u05d5\u05db\u05df \u05dc\u05d9\u05e6\u05d5\u05e8 \u05e7\u05d1\u05e6\u05d9 \u05e4\u05e8\u05d5\u05d9\u05e7\u05d8 \u05d0\u05de\u05d9\u05ea\u05d9\u05d9\u05dd. \u05d0\u05e4\u05e9\u05e8 \u05dc\u05d4\u05ea\u05d1\u05e1\u05e1 \u05e2\u05dc \u05ea\u05d5\u05db\u05e0\u05d9\u05ea \u05e9\u05e0\u05d5\u05e6\u05e8\u05d4 \u05d5\u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05d4\u05e0\u05d7\u05d9\u05d5\u05ea \u05d7\u05d5\u05e4\u05e9\u05d9\u05d5\u05ea. \u05d4\u05e7\u05d1\u05e6\u05d9\u05dd \u05e0\u05d5\u05e6\u05e8\u05d9\u05dd \u05dc\u05e1\u05e7\u05d9\u05e8\u05d4 \u05d5\u05d4\u05d5\u05e8\u05d3\u05d4 \u05d1\u05dc\u05d1\u05d3 \u2014 \u05e9\u05d5\u05dd \u05d3\u05d1\u05e8 \u05dc\u05d0 \u05e0\u05db\u05ea\u05d1 \u05dc\u05de\u05d0\u05d2\u05e8 GitHub \u05e9\u05dc\u05db\u05dd.",
+    selectPlanLabel: "\u05ea\u05d5\u05db\u05e0\u05d9\u05ea \u05de\u05e7\u05d5\u05e8 (\u05dc\u05d0 \u05d7\u05d5\u05d1\u05d4)",
+    planOptionNone: "\u05dc\u05dc\u05d0 \u05ea\u05d5\u05db\u05e0\u05d9\u05ea \u2014 \u05dc\u05e4\u05d9 \u05d4\u05d1\u05e0\u05ea \u05d4\u05e4\u05e8\u05d5\u05d9\u05e7\u05d8",
+    buildBtn: "\u05d1\u05e0\u05d4 \u05e4\u05e8\u05d5\u05d9\u05e7\u05d8",
+    building: "\u05d1\u05d5\u05e0\u05d4\u2026",
+    buildSummary: "\u05e1\u05d9\u05db\u05d5\u05dd",
+    downloadZipBtn: "\u05d4\u05d5\u05e8\u05d3 .zip",
+    noBuildYet: "\u05e2\u05d3\u05d9\u05d9\u05df \u05dc\u05d0 \u05e0\u05d5\u05e6\u05e8\u05d4 \u05d1\u05e0\u05d9\u05d9\u05d4.",
+    pastBuilds: "\u05d1\u05e0\u05d9\u05d5\u05ea \u05e7\u05d5\u05d3\u05de\u05d5\u05ea",
+    openBuildBtn: "\u05e4\u05ea\u05d7",
+    noBuildsYet: "\u05d0\u05d9\u05df \u05e2\u05d3\u05d9\u05d9\u05df \u05d1\u05e0\u05d9\u05d5\u05ea \u05dc\u05e4\u05e8\u05d5\u05d9\u05e7\u05d8 \u05d4\u05d6\u05d4.",
+    buildFilesCount: "\u05e7\u05d1\u05e6\u05d9\u05dd",
+    buildStatus: { running: "\u05e8\u05e5", ready: "\u05de\u05d5\u05db\u05df", error: "\u05e9\u05d2\u05d9\u05d0\u05d4" },
     settingsExplain: "\u05d4\u05d5\u05e1\u05d9\u05e4\u05d5 \u05de\u05e4\u05ea\u05d7\u05d5\u05ea API \u05de\u05e9\u05dc\u05db\u05dd \u05dc-OpenAI \u05d5-Gemini, \u05d1\u05d7\u05e8\u05d5 \u05e1\u05e4\u05e7 \u05e4\u05e2\u05d9\u05dc \u05d5\u05d1\u05d3\u05e7\u05d5 \u05d0\u05ea \u05d4\u05d7\u05d9\u05d1\u05d5\u05e8. \u05d4\u05de\u05e4\u05ea\u05d7 \u05d4\u05de\u05dc\u05d0 \u05dc\u05e2\u05d5\u05dc\u05dd \u05dc\u05d0 \u05de\u05d5\u05d7\u05d6\u05e8 \u05de\u05d4\u05e9\u05e8\u05ea \u2014 \u05de\u05d5\u05e6\u05d2\u05d5\u05ea \u05e8\u05e7 4 \u05d4\u05e1\u05e4\u05e8\u05d5\u05ea \u05d4\u05d0\u05d7\u05e8\u05d5\u05e0\u05d5\u05ea.",
     activeProvider: "\u05e1\u05e4\u05e7 \u05e4\u05e2\u05d9\u05dc",
     activeProviderHint: "\u05de\u05e9\u05de\u05e9 \u05d0\u05ea \u05d4\u05e1\u05d5\u05db\u05df \u05dc\u05e2\u05d9\u05e6\u05d5\u05d1\u05d9\u05dd, \u05ea\u05d5\u05db\u05e0\u05d9\u05d5\u05ea \u05d5\u05ea\u05e9\u05d5\u05d1\u05d5\u05ea.",
@@ -410,6 +439,7 @@ export const DICT: Record<Lang, any> = {
       ask: { title: "Спросить память", hint: "Спросите о том, что агент уже изучил" },
       design: { title: "Дизайн платформы", hint: "Спроектируйте обновление для выбранного проекта" },
       plan: { title: "План", hint: "Сгенерируйте подробные md-файлы и промпты для агентов" },
+      build: { title: "Сборка", hint: "Сгенерируйте реальные файлы проекта из плана и инструкций" },
       settings: { title: "API-ключи", hint: "Добавьте свои ключи OpenAI и Gemini и выберите активного провайдера" }
     },
     sourcesExplain: "Создайте тему, затем добавьте внешние ссылки (GitHub или любой сайт). Агент загрузит каждую страницу, разобьёт её на фрагменты, построит эмбеддинги и сохранит их под темой. Позже он сможет превратить эти знания в навыки.",
@@ -488,6 +518,19 @@ export const DICT: Record<Lang, any> = {
     copy: "Копировать",
     copied: "Скопировано",
     noPlanYet: "План ещё не сгенерирован.",
+    buildExplain: "Выберите проект, и агент сгенерирует реальные файлы проекта. При желании возьмите за основу сгенерированный план и добавьте свободные инструкции. Файлы создаются только для просмотра и скачивания — ничего не записывается в ваш GitHub-репозиторий.",
+    selectPlanLabel: "Исходный план (необязательно)",
+    planOptionNone: "Без плана — по пониманию проекта",
+    buildBtn: "Собрать проект",
+    building: "Собираю…",
+    buildSummary: "Сводка",
+    downloadZipBtn: "Скачать .zip",
+    noBuildYet: "Сборка ещё не сгенерирована.",
+    pastBuilds: "Прошлые сборки",
+    openBuildBtn: "Открыть",
+    noBuildsYet: "Для этого проекта пока нет сборок.",
+    buildFilesCount: "файлов",
+    buildStatus: { running: "Выполняется", ready: "Готово", error: "Ошибка" },
     settingsExplain: "Добавьте свои API-ключи OpenAI и Gemini, выберите активного провайдера и проверьте подключение. Полный ключ никогда не возвращается сервером — показываются только последние 4 цифры.",
     activeProvider: "Активный провайдер",
     activeProviderHint: "Используется агентом для дизайнов, планов и ответов.",

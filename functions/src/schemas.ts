@@ -88,6 +88,14 @@ export const GeneratePlanSchema = z.object({
   lang: replyLang
 });
 
+// Real-development BUILD request (CONTRACT v2.2). `projectId` comes from the
+// route param; `planId` (optional) seeds the build from an owned generated plan.
+export const BuildSchema = z.object({
+  planId: z.string().min(3).max(ID_MAX).optional(),
+  instructions: z.string().max(INSTRUCTIONS_MAX).optional(),
+  lang: replyLang
+});
+
 // Per-user provider API keys. A string sets/replaces the key, `null` deletes it,
 // and omitting a field leaves it untouched. Keys are validated by provider prefix
 // and bounded in length (DoS / cost-abuse guard).
