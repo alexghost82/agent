@@ -361,8 +361,120 @@ Backend agents touching `functions/src/index.ts` (router wiring) and
 `functions/src/schemas.ts` coordinate through the Architect: append-only, one
 router/schema block per agent, never reorder existing wiring.
 
+---
+
+# CONTRACT v3 — Execution, deeper memory, self-learning
+
+> **Status:** FROZEN. Version `3.0.0`. Owner: **Architect**.
+> v3 turns BUILD from "generate files" into "generate **and verify** files", makes
+> memory deeper and unbounded, closes the self-learning loop, and bounds deep
+> ingest. v1/v2 remain in force. New env flags default to the **safe, currently
+> tested** behaviour so CI stays green without cloud infra.
+
+## v3.1 Build execution / verification (owner: A2 — `functions/src/build.ts`, `routes/build.ts`)
+
+`build_runs` gains a `verification` sub-document; artifacts are materialized to an
+**ephemeral, per-run sandbox directory** (under the OS temp dir), path-sanitized
+(reusing `sanitizeArtifactPath`). The sandbox is for inspection/verification only:
+
+| `verification` field | Type | Notes |
+|---|---|---|
+| `status` | `"skipped" \| "passed" \| "failed" \| "error"` | `skipped` is the safe default. |
+| `checks` | `{ name: string; ok: boolean; detail?: string }[]` | One per check run. |
+| `summary` | string | Human summary. |
+| `durationMs` | number | Wall-clock of verification. |
+
+Rules (frozen):
+
+- **No untrusted code execution by default.** With `BUILD_EXEC_ENABLED` unset/`0`,
+  verification runs only **static, safe checks** (artifact count > 0, paths safe,
+  JSON files parse, declared entry files present). It NEVER runs `npm install`,
+  arbitrary scripts, or generated code.
+- Optional real toolchain checks (`tsc`/`eslint`/tests) are gated behind
+  `BUILD_EXEC_ENABLED=1` and are intended only for an isolated runner
+  (Cloud Run job / dedicated sandbox), never the shared API instance.
+- The sandbox is created under `os.tmpdir()`, scoped to the `buildRunId`, and
+  **deleted after** verification. Nothing is written outside it.
+- **Never writes to any external git remote.** A throwaway local `git init` inside
+  the sandbox is permitted; pushing anywhere is forbidden.
+- `POST /projects/:id/build` response gains `verification` (the report above).
+
+## v3.2 VectorIndex backend (owner: A4 — `functions/src/memory.ts`, `firestore.indexes.json`)
+
+The `VectorIndex` interface from v2.1 is unchanged. A4 adds a second
+implementation selected by env, behind the same `searchMemory` facade:
+
+- `VECTOR_BACKEND` ∈ `{"memory","firestore"}`, default `"memory"` (the tested
+  in-process cosine path; the only one the Firestore **emulator** supports).
+- `"firestore"` uses Firestore Vector Search `findNearest(embedding, queryVector,
+  { limit, distanceMeasure: "COSINE" })` with the same `userId`(+`topicId`/
+  `projectId`) equality pre-filters. Recall is **not** bounded by
+  `VECTOR_CANDIDATE_CAP` in this mode.
+- `firestore.indexes.json` gains a `fieldOverrides` vector config on
+  `knowledge_chunks.embedding` (`{ vectorConfig: { dimension, flat: {} } }`,
+  dimension = embedding size, e.g. 1536 for `text-embedding-3-small`).
+- Selection of backend must be a pure, unit-testable function; tests exercise the
+  in-memory path (emulator-safe) and assert the firestore path is requested when
+  flagged.
+
+## v3.3 Skill schema v2 validation (owner: A4 — `schemas.ts`, `routes/skills.ts`)
+
+Extraction persists and validates the v2 fields (see v2.3): `appliesTo: string[]`,
+`template: string|null`, `version: number` (default `2` for newly extracted),
+`quality: { score: number 0..1; rationale?: string }`. A pure validator scores
+each extracted skill; skills below `SKILL_MIN_QUALITY` (default `0.3`) are
+dropped. `build.ts` already consumes `appliesTo`/`template` — writers must keep
+those fields present so generation is actually influenced.
+
+## v3.4 Self-learning loop (owner: A3 — `functions/src/learn.ts`)
+
+A single writer `recordOutcome({ userId, projectId?, topicId?, kind, title,
+content })` appends an outcome to `knowledge_chunks`:
+
+- `chunkType` ∈ `{"design_outcome","plan_outcome","build_outcome","ask_outcome"}`,
+  `scope` `"project"` (project-bound) or `"build"`.
+- Embedded like any chunk; **deduped by `contentHash`** (v2.1); skips empty/low-value
+  content. `userId` scope mandatory; never crosses tenants.
+- Wired into `design`/`build` (and optionally `ask`) success paths, **best-effort**
+  (a feedback-write failure never fails the originating request).
+
+## v3.5 Deep ingest (owner: A3 — `functions/src/ssrf.ts`, `routes/sources.ts`)
+
+`readUrl` stays; add a bounded crawler `crawlSite(rootUrl, opts)`:
+
+- Same-origin only (host must equal the root host). Every fetched URL passes
+  `assertPublicHttpUrl` (SSRF guard).
+- Seed from `<root>/sitemap.xml` when present + in-page `<a href>` links.
+- Caps: `INGEST_MAX_PAGES` (default 20), `INGEST_MAX_DEPTH` (default 2), per-page
+  byte cap unchanged. PDF (`application/pdf`) extracted to text.
+- Dedup pages by normalized URL; dedup chunks by `contentHash` so re-`/learn`
+  of a URL does not duplicate knowledge.
+- `/learn` accepts an optional `deep?: boolean` (default false → current single
+  page behaviour, fully backward compatible).
+
+## v3.6 Memory inspection / deletion (owner: A3 — `functions/src/routes/memory.ts`)
+
+| Method | Path | Returns / Effect |
+|---|---|---|
+| `GET` | `/memory?topicId=&projectId=&limit=` | `{ chunks: [{id,title,sourceUrl,chunkType,scope,preview,createdAt}] }` (owned; never returns raw `embedding`). |
+| `DELETE` | `/memory/:id` | Deletes one owned chunk (404 if not owned). `{ status: "deleted" }`. |
+
+## v3.7 Providers v2 (owner: A8 — `functions/src/providers/**`, `ai.ts`, `schemas.ts`)
+
+`ProviderName` extends to `"openai" | "gemini" | "anthropic" | "azure-openai"`.
+New providers implement the existing `embedding`/`embeddingBatch`/`llm`/`test`
+shape used by `ai.ts`. Key validation: Anthropic `^sk-ant-`, Azure by endpoint+key.
+Per-user **usage accounting**: `recordUsage(userId, { kind: "ask"|"design"|"plan"|
+"build"|"ingest", tokensIn?, tokensOut?, units? })` increments a
+`usage/{userId}` doc (monthly buckets); read-only, advisory (no enforcement yet).
+
 ## Changelog
 
+- `3.0.0` — v3 contracts: build execution/verification (`verification` report,
+  ephemeral sandbox, `BUILD_EXEC_ENABLED` gate, never external git),
+  `VECTOR_BACKEND` selection (memory/firestore `findNearest`), skill v2 validation,
+  self-learning `recordOutcome`, deep ingest crawler + `deep` flag, memory
+  inspect/delete endpoints, providers v2 (Anthropic/Azure) + usage accounting.
 - `2.0.0` — v2 contracts: vector interface invariants + `contentHash` dedup,
   build/execution model (`build_runs`/`build_artifacts` + endpoints, sandbox =
   Firestore workspace, never writes GitHub), skill schema v2, self-learning loop,

@@ -4,11 +4,16 @@ struct LoginView: View {
     @Environment(AppModel.self) private var model
     @State private var username = ""
     @State private var password = ""
+    @State private var firebaseEmail = ""
+    @State private var firebasePassword = ""
+    @State private var showFirebase = false
     @FocusState private var focusedField: Field?
 
     private enum Field {
         case username
         case password
+        case firebaseEmail
+        case firebasePassword
     }
 
     private var t: Strings { model.t }
@@ -113,6 +118,9 @@ struct LoginView: View {
             .opacity(username.trimmed.isEmpty || password.isEmpty ? 0.45 : 1)
             .accessibilityIdentifier("sign-in-button")
             .padding(.top, 20)
+
+            firebaseSection
+                .padding(.top, 18)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 32)
@@ -122,6 +130,70 @@ struct LoginView: View {
                 .stroke(BrandTheme.ColorToken.line, lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.35), radius: 40, y: 24)
+    }
+
+    // MARK: - Firebase sign-in (ID-token exchange via POST /auth/firebase)
+
+    private var firebaseSection: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Rectangle().fill(BrandTheme.ColorToken.line).frame(height: 1)
+                Text(t.g("login", "firebaseTitle"))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                Rectangle().fill(BrandTheme.ColorToken.line).frame(height: 1)
+            }
+
+            DisclosureGroup(isExpanded: $showFirebase) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if model.firebaseStatus == .sdkUnavailable {
+                        Text(t.g("login", "firebaseUnavailable"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    } else {
+                        fieldLabel(t.g("login", "firebaseEmail"))
+                        inputField(
+                            text: $firebaseEmail,
+                            placeholder: "you@example.com",
+                            isSecure: false,
+                            field: .firebaseEmail,
+                            submitLabel: .next
+                        ) {
+                            focusedField = .firebasePassword
+                        }
+                        .keyboardType(.emailAddress)
+
+                        fieldLabel(t.g("login", "firebasePassword"))
+                            .padding(.top, 12)
+                        inputField(
+                            text: $firebasePassword,
+                            placeholder: "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}",
+                            isSecure: true,
+                            field: .firebasePassword,
+                            submitLabel: .go
+                        ) {
+                            submitFirebase()
+                        }
+
+                        Button(action: submitFirebase) {
+                            Text(t.g("login", "firebaseSignIn"))
+                        }
+                        .buttonStyle(PrimaryBrandButtonStyle(isProminent: false))
+                        .disabled(firebaseEmail.trimmed.isEmpty || firebasePassword.isEmpty || model.isLoading)
+                        .accessibilityIdentifier("firebase-sign-in-button")
+                        .padding(.top, 16)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                Text(t.g("login", "firebaseSignIn"))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(BrandTheme.ColorToken.accent)
+            }
+        }
     }
 
     // MARK: - Top bar (language + theme), mirrors the web .login-top
@@ -230,6 +302,20 @@ struct LoginView: View {
         focusedField = nil
         Task {
             await model.login(username: username.trimmed, password: password)
+            if model.session != nil {
+                Feedback.success()
+            } else if model.errorMessage != nil {
+                Feedback.error()
+            }
+        }
+    }
+
+    private func submitFirebase() {
+        guard !firebaseEmail.trimmed.isEmpty, !firebasePassword.isEmpty, !model.isLoading else { return }
+        Feedback.impact()
+        focusedField = nil
+        Task {
+            await model.signInWithFirebaseEmail(email: firebaseEmail.trimmed, password: firebasePassword)
             if model.session != nil {
                 Feedback.success()
             } else if model.errorMessage != nil {

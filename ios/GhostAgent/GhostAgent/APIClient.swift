@@ -30,6 +30,13 @@ struct APIClient {
         let _: EmptyResponse = try await request("POST", path: "/logout", body: Optional<String>.none, token: token)
     }
 
+    /// Exchange a verified Firebase Auth ID token for a GHOST session bearer
+    /// (`POST /auth/firebase`). Public endpoint — no bearer is attached.
+    func authFirebase(idToken: String) async throws -> LoginResponse {
+        let body = ["idToken": idToken]
+        return try await request("POST", path: "/auth/firebase", body: body, token: nil)
+    }
+
     func dashboard(token: String) async throws -> DashboardResponse {
         try await request("GET", path: "/dashboard", body: Optional<String>.none, token: token)
     }

@@ -5,12 +5,14 @@ import { safeJsonObject } from "../pure";
 import { llm } from "../ai";
 import { searchMemory } from "../memory";
 import { rateLimit } from "../ratelimit";
+import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
 import { listScoped } from "../listing";
 import { bumpCounter } from "../stats";
 import { sendError, notFound } from "../errors";
 import { GeneratePlanSchema } from "../schemas";
 import { normalizeLang, languageDirective } from "../lang";
+import { recordUsage } from "../usage";
 
 export const plansRouter = Router();
 
@@ -38,7 +40,7 @@ plansRouter.get("/generated-plans", async (req: AuthedRequest, res: Response) =>
   }
 });
 
-plansRouter.post("/generate-plan", rateLimit("generate-plan", 12, 60_000), async (req: AuthedRequest, res: Response) => {
+plansRouter.post("/generate-plan", rateLimit("generate-plan", 12, 60_000), distributedRateLimit("generate-plan", 80, 3_600_000), async (req: AuthedRequest, res: Response) => {
   try {
     const { projectId, instructions, lang } = GeneratePlanSchema.parse(req.body);
     const replyLang = normalizeLang(lang);
@@ -143,6 +145,7 @@ ${contextText.slice(0, 16000)}
       createdAt: serverTime()
     });
     await bumpCounter(req.userId!, "generated_plans");
+    await recordUsage(req.userId!, "plan");
     await logEvent(req.userId!, "plan_generated", project.name, { projectId, files: files.length, prompts: prompts.length });
     res.json({ id: ref.id, files, prompts });
   } catch (err) {

@@ -30,6 +30,16 @@ jobs:
           else
             echo "::warning title=Frontend lint pending::No root ESLint flat config found (Next 16 removed 'next lint'). Add eslint.config.mjs (e.g. 'npx @next/codemod next-lint-to-eslint-cli .') and this gate will run automatically."
           fi
+      - name: Frontend tests (Vitest + RTL)
+        # Runs the app/** unit/component tests added by the Frontend mission.
+        # Skips automatically if the script is not present so unrelated work is
+        # never blocked during rollout.
+        run: |
+          if npm run | grep -q '^  test:web'; then
+            npm run test:web
+          else
+            echo "::warning title=Frontend tests pending::No 'test:web' script found; skipping."
+          fi
       - name: Install functions deps
         run: cd functions && npm install
       - name: Build functions

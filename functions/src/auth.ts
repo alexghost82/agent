@@ -1,13 +1,74 @@
 import * as crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
 import { Timestamp } from "firebase-admin/firestore";
-import { db } from "./firebase";
+import { db, admin } from "./firebase";
 import { serverTime } from "./util";
 
 export interface AuthedRequest extends Request {
   userId?: string;
   username?: string;
+  role?: UserRole;
   requestId?: string;
+}
+
+export type UserRole = "admin" | "member";
+
+// Session transport (SECURITY v2): in addition to the Authorization: Bearer
+// header (used by the iOS/native client), the web client authenticates via an
+// httpOnly cookie. Because Firebase Hosting rewrites `/api/**` to this function,
+// the browser and the API share an origin, so a SameSite=Strict cookie is sent
+// on same-origin XHR while being immune to cross-site (CSRF) sends. Storing the
+// session in an httpOnly cookie removes the localStorage XSS token-theft vector.
+export const SESSION_COOKIE = "gh_session";
+
+function parseCookies(header?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const k = part.slice(0, idx).trim();
+    if (!k) continue;
+    out[k] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
+// Bearer header takes precedence; the cookie is the browser fallback.
+export function sessionTokenFromRequest(req: Request): string {
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Bearer ")) {
+    const t = header.slice(7).trim();
+    if (t) return t;
+  }
+  return parseCookies(req.headers.cookie).gh_session || "";
+}
+
+function cookieAttrs(extra: string[]): string {
+  const attrs = [`Path=/`, "HttpOnly", "SameSite=Strict", ...extra];
+  // Secure cannot be set over plain http (emulator/local); HSTS-style gate.
+  if (!process.env.FUNCTIONS_EMULATOR) attrs.push("Secure");
+  return attrs.join("; ");
+}
+
+export function setSessionCookie(res: Response, token: string): void {
+  const maxAge = Math.floor(sessionTtlMs() / 1000);
+  res.append("Set-Cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; ${cookieAttrs([`Max-Age=${maxAge}`])}`);
+}
+
+export function clearSessionCookie(res: Response): void {
+  res.append("Set-Cookie", `${SESSION_COOKIE}=; ${cookieAttrs(["Max-Age=0"])}`);
+}
+
+// Middleware factory: gate a route on a role. Must run after requireAuth.
+export function requireRole(role: UserRole) {
+  return (req: AuthedRequest, res: Response, next: NextFunction): void => {
+    if (req.role !== role) {
+      res.status(403).json({ error: "forbidden", requestId: req.requestId });
+      return;
+    }
+    next();
+  };
 }
 
 export function makeSalt(): string {
@@ -67,6 +128,8 @@ export async function ensureSeedUsers(): Promise<void> {
         username: u.username,
         salt,
         passwordHash: hashPassword(u.password, salt),
+        // Seed users are the platform operators; everyone else is a member.
+        role: "admin",
         createdAt: serverTime()
       });
     }
@@ -86,10 +149,23 @@ export function ensureSeedUsersOnce(): Promise<void> {
   return seedPromise;
 }
 
+// Server-side verification of a Firebase Auth ID token (CONTRACT v3 / §9 iOS).
+// The mobile client authenticates with Firebase, sends the ID token, and the
+// backend verifies it with the Admin SDK before issuing a GHOST session. Throws
+// on any invalid/expired token.
+export interface VerifiedFirebaseUser {
+  uid: string;
+  email?: string;
+  name?: string;
+}
+export async function verifyFirebaseIdToken(idToken: string): Promise<VerifiedFirebaseUser> {
+  const decoded = await admin.auth().verifyIdToken(idToken);
+  return { uid: decoded.uid, email: decoded.email, name: (decoded as { name?: string }).name };
+}
+
 export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const header = req.headers.authorization || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    const token = sessionTokenFromRequest(req);
     if (!token) {
       res.status(401).json({ error: "unauthorized", requestId: req.requestId });
       return;
@@ -108,6 +184,7 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     }
     req.userId = doc.id;
     req.username = doc.data().username;
+    req.role = doc.data().role === "admin" ? "admin" : "member";
     next();
   } catch {
     res.status(401).json({ error: "unauthorized", requestId: req.requestId });

@@ -3,12 +3,13 @@
 import { useState } from "react";
 import type { GhostData } from "../../useGhostData";
 import { Json } from "../../api";
+import { downloadZip } from "../../zip";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
 
 export function SkillsPanel({ g }: { g: GhostData }) {
-  const { t, topics, skills, selectedTopic, setSelectedTopic, loading, output } = g;
+  const { t, topics, skills, selectedTopic, setSelectedTopic, loading, output, stats } = g;
 
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -32,6 +33,43 @@ export function SkillsPanel({ g }: { g: GhostData }) {
     setEditId(null);
   }
 
+  // Export the agent's learned skills (and the currently available knowledge
+  // snapshot) as a small archive: a structured skills.json plus a readable
+  // knowledge.md. A dedicated memory/knowledge list endpoint is not yet exposed
+  // client-side, so we include the dashboard stats and leave a `memory` array
+  // for a future list to slot into without changing the file shape.
+  function exportKnowledge() {
+    const exportedAt = new Date().toISOString();
+    const exportedSkills = skills.map((s) => ({
+      id: s.id,
+      skillName: s.skillName,
+      description: s.description,
+      example: s.example,
+      source: s.source,
+      topicId: s.topicId
+    }));
+    const payload = {
+      exportedAt,
+      skills: exportedSkills,
+      knowledge: { stats: stats ?? null, memory: [] as Json[] }
+    };
+    const md = [
+      "# GHOST knowledge export",
+      "",
+      `_Exported ${exportedAt}_`,
+      "",
+      `## Skills (${exportedSkills.length})`,
+      "",
+      ...exportedSkills.map(
+        (s) => `- **${String(s.skillName || "")}** — ${String(s.description || "")}`
+      )
+    ].join("\n");
+    downloadZip("ghost-knowledge", [
+      { path: "skills.json", content: JSON.stringify(payload, null, 2) },
+      { path: "knowledge.md", content: md }
+    ]);
+  }
+
   return (
     <section className="panel">
       <div className="explain">{t.skillsExplain}</div>
@@ -53,9 +91,14 @@ export function SkillsPanel({ g }: { g: GhostData }) {
         <h3>
           {t.mySkills} ({skills.length})
         </h3>
-        <button className="ghost sm" onClick={g.loadSkills}>
-          <Icon name="refresh" /> {t.refreshList}
-        </button>
+        <div className="row-actions">
+          <button className="ghost sm" onClick={exportKnowledge} disabled={!skills.length}>
+            <Icon name="download" /> {t.exportSkills}
+          </button>
+          <button className="ghost sm" onClick={g.loadSkills}>
+            <Icon name="refresh" /> {t.refreshList}
+          </button>
+        </div>
       </div>
       {skills.length ? (
         <>

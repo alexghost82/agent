@@ -14,6 +14,8 @@ functions/lib
 functions/node_modules
 functions/.env
 functions/.env.local
+functions/.env.*
+!functions/.env.example
 ios/**/GoogleService-Info.plist
 ios/**/*.xcuserstate
 ios/**/xcuserdata

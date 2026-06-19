@@ -1,5 +1,7 @@
 // Pure helpers with no Firebase / network dependencies (safe to unit test).
 
+import { createHash } from "node:crypto";
+
 export function chunkText(text: string, maxChars = 2200): string[] {
   const clean = text.replace(/\s+/g, " ").trim();
   const chunks: string[] = [];
@@ -131,11 +133,125 @@ export interface BuildFile {
   bytes: number;
 }
 
+export interface VerificationCheck {
+  name: string;
+  ok: boolean;
+  detail?: string;
+}
+
+// Static, safe verification of generated build files (CONTRACT v3.1). No code is
+// executed: presence, path safety, JSON validity, and a recognizable entry file.
+export function staticBuildChecks(files: BuildFile[]): VerificationCheck[] {
+  const checks: VerificationCheck[] = [];
+  checks.push({ name: "files_present", ok: files.length > 0, detail: `${files.length} file(s)` });
+
+  const unsafe = files.filter((f) => sanitizeArtifactPath(f.path) !== f.path);
+  checks.push({ name: "paths_safe", ok: unsafe.length === 0, detail: unsafe.map((f) => f.path).join(", ") || undefined });
+
+  const badJson = files
+    .filter((f) => f.path.toLowerCase().endsWith(".json"))
+    .filter((f) => {
+      try { JSON.parse(f.content); return false; } catch { return true; }
+    });
+  checks.push({ name: "json_parses", ok: badJson.length === 0, detail: badJson.map((f) => f.path).join(", ") || undefined });
+
+  const entryRx = /(^|\/)(package\.json|index\.(t|j)sx?|main\.(t|j)sx?|main\.py|Cargo\.toml|go\.mod|README\.md)$/i;
+  const hasEntry = files.some((f) => entryRx.test(f.path));
+  checks.push({ name: "entry_present", ok: hasEntry, detail: hasEntry ? undefined : "no recognizable entry/manifest file" });
+
+  return checks;
+}
+
 // Truncate `content` to at most `maxBytes` UTF-8 bytes.
 function truncateUtf8(content: string, maxBytes: number): string {
   const buf = Buffer.from(content, "utf8");
   if (buf.length <= maxBytes) return content;
   return buf.subarray(0, maxBytes).toString("utf8");
+}
+
+// --- Memory dedup (CONTRACT v2.1 / v3.4) -----------------------------------
+
+// Stable dedup key for a knowledge chunk: sha256 of the whitespace-normalized
+// content. Writers skip a chunk whose (userId, scope, topic|project, hash) pair
+// already exists, so re-learning the same material does not duplicate memory.
+export function contentHash(content: string): string {
+  const normalized = String(content).replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
+}
+
+// --- Deep ingest helpers (CONTRACT v3.5) -----------------------------------
+
+// True when both URLs share the same host (same-origin crawl boundary).
+export function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).host === new URL(b).host;
+  } catch {
+    return false;
+  }
+}
+
+// Extract <loc> URLs from a sitemap.xml body (handles urlset + sitemapindex).
+export function parseSitemapUrls(xml: string): string[] {
+  const out: string[] = [];
+  const re = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) out.push(m[1].trim());
+  return out;
+}
+
+// Resolve a possibly-relative href against a base, dropping the fragment.
+// Returns null for unusable / non-http(s) links.
+export function resolveCrawlUrl(href: string, base: string): string | null {
+  try {
+    const u = new URL(href, base);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+// --- Vector backend selection (CONTRACT v3.2) ------------------------------
+
+export type VectorBackend = "memory" | "firestore";
+
+// Pure selector so the backend choice is unit-testable without Firestore. Only
+// the explicit "firestore" value opts into Vector Search; everything else
+// (including unset) keeps the emulator-safe in-memory cosine default.
+export function selectVectorBackend(env: string | undefined): VectorBackend {
+  return env === "firestore" ? "firestore" : "memory";
+}
+
+// --- Skill v2 quality validation (CONTRACT v3.3) ---------------------------
+
+export interface SkillQuality {
+  score: number;
+  rationale?: string;
+}
+
+export interface SkillLike {
+  skillName?: unknown;
+  description?: unknown;
+  example?: unknown;
+  template?: unknown;
+  appliesTo?: unknown;
+}
+
+// Heuristic 0..1 quality score for an extracted skill. Pure + deterministic so
+// extraction can drop low-value skills below SKILL_MIN_QUALITY (CONTRACT v3.3).
+export function scoreExtractedSkill(s: SkillLike): SkillQuality {
+  const name = typeof s.skillName === "string" ? s.skillName.trim() : "";
+  const desc = typeof s.description === "string" ? s.description.trim() : "";
+  const reasons: string[] = [];
+  let score = 0;
+  if (name.length >= 3) score += 0.25; else reasons.push("name too short");
+  if (desc.length >= 20) score += 0.35; else reasons.push("description too short");
+  if (typeof s.example === "string" && s.example.trim().length >= 10) score += 0.15;
+  if (typeof s.template === "string" && s.template.trim().length >= 10) score += 0.15;
+  if (Array.isArray(s.appliesTo) && s.appliesTo.length > 0) score += 0.1;
+  score = Math.min(1, Math.round(score * 100) / 100);
+  return { score, rationale: reasons.length ? reasons.join("; ") : "ok" };
 }
 
 // Validate + sanitize a raw `{path, content}[]` proposal from the model into

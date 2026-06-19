@@ -4,12 +4,15 @@ import { serverTime, logEvent } from "../util";
 import { generateAnswer } from "../ai";
 import { searchMemory } from "../memory";
 import { rateLimit } from "../ratelimit";
+import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
 import { listScoped } from "../listing";
 import { bumpCounter } from "../stats";
 import { sendError, notFound } from "../errors";
 import { DesignSchema } from "../schemas";
 import { normalizeLang, languageDirective } from "../lang";
+import { recordOutcome } from "../learn";
+import { recordUsage } from "../usage";
 
 export const designRouter = Router();
 
@@ -37,7 +40,7 @@ designRouter.get("/design", async (req: AuthedRequest, res: Response) => {
   }
 });
 
-designRouter.post("/design", rateLimit("design", 20, 60_000), async (req: AuthedRequest, res: Response) => {
+designRouter.post("/design", rateLimit("design", 20, 60_000), distributedRateLimit("design", 100, 3_600_000), async (req: AuthedRequest, res: Response) => {
   try {
     const { projectId, section, lang } = DesignSchema.parse(req.body);
     const replyLang = normalizeLang(lang);
@@ -100,6 +103,15 @@ ${languageDirective(replyLang)}`;
       createdAt: serverTime()
     });
     await bumpCounter(req.userId!, "project_decisions");
+    await recordUsage(req.userId!, "design");
+    // Self-learning (CONTRACT v3.4): feed the design outcome back into memory.
+    await recordOutcome({
+      userId: req.userId!,
+      projectId,
+      kind: "design_outcome",
+      title: `Design: ${project.name}${section ? ` — ${section.slice(0, 80)}` : ""}`,
+      content: design
+    });
     await logEvent(req.userId!, "design_created", project.name, { projectId, section: section || null });
     res.json({ id: ref.id, plan: design, sources: context });
   } catch (err) {

@@ -1,6 +1,6 @@
 import { db } from "./firebase";
 import { embedding } from "./ai";
-import { cosineSimilarity } from "./pure";
+import { cosineSimilarity, selectVectorBackend } from "./pure";
 import { log } from "./log";
 
 export interface SearchScope {
@@ -64,7 +64,51 @@ class InMemoryCosineIndex implements VectorIndex {
   }
 }
 
-const index: VectorIndex = new InMemoryCosineIndex();
+// Firestore Vector Search backend (CONTRACT v3.2). Selected with
+// VECTOR_BACKEND="firestore". Uses `findNearest`, so recall is NOT bounded by
+// VECTOR_CANDIDATE_CAP. Requires the `embedding` vector field override in
+// firestore.indexes.json and embeddings stored as Firestore vector values.
+// Not exercised by the Firestore emulator (which lacks findNearest); the
+// in-memory backend remains the default and the tested path.
+class FirestoreVectorIndex implements VectorIndex {
+  async search(query: string, scope: SearchScope, limit: number): Promise<ScoredChunk[]> {
+    const qEmbedding = await embedding(query, scope.userId);
+    let q: FirebaseFirestore.Query = db.collection("knowledge_chunks").where("userId", "==", scope.userId);
+    if (scope.topicId) q = q.where("topicId", "==", scope.topicId);
+    if (scope.projectId) q = q.where("projectId", "==", scope.projectId);
+
+    // `findNearest` is available on the Admin SDK Query; cast keeps this
+    // compiling across SDK minor versions without pinning the vector types.
+    const vectorQuery = (q as unknown as {
+      findNearest(opts: { vectorField: string; queryVector: number[]; limit: number; distanceMeasure: "COSINE" }): FirebaseFirestore.Query;
+    }).findNearest({ vectorField: "embedding", queryVector: qEmbedding, limit, distanceMeasure: "COSINE" });
+
+    const snap = await vectorQuery.get();
+    return snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        sourceUrl: data.sourceUrl,
+        sourcePath: data.sourcePath,
+        title: data.title,
+        content: data.content,
+        chunkType: data.chunkType,
+        scope: data.scope,
+        // Distance is not returned uniformly across SDK versions; expose 0 as a
+        // neutral score since callers rank by retrieval order here.
+        score: 0
+      };
+    });
+  }
+}
+
+function makeIndex(): VectorIndex {
+  return selectVectorBackend(process.env.VECTOR_BACKEND) === "firestore"
+    ? new FirestoreVectorIndex()
+    : new InMemoryCosineIndex();
+}
+
+const index: VectorIndex = makeIndex();
 
 // Always scoped to a single user (data isolation). Optionally narrowed to a
 // topic or project to keep the candidate set small.

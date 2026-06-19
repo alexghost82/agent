@@ -15,6 +15,8 @@ final class AppModel {
     var skills: [JSONValue] = []
     var projects: [JSONValue] = []
     var plans: [JSONValue] = []
+    var builds: [JSONValue] = []
+    var memoryChunks: [JSONValue] = []
     var output: [String: JSONValue] = [:]
     var loading: Set<String> = []
     var selectedTopic = ""
@@ -24,30 +26,50 @@ final class AppModel {
     var isLoading = false
     var errorMessage: String?
 
-    private let keychain: KeychainStore
+    private let keychain: SessionStoring
     private let api: APIClient
+    private let firebaseAuth: FirebaseSignIn
     @ObservationIgnored private var ingestPollTask: Task<Void, Never>?
 
     /// Localized strings for the current language (EN/HE/RU), in parity with the web i18n.
     var t: Strings { Strings.resolve(lang) }
 
-    /// True while any connected project is still being read/indexed by the agent.
+    /// True while any connected project is still queued for or actively being
+    /// read/indexed by the agent (ingest is asynchronous: queued → ingesting → ready).
     var isIngesting: Bool {
-        projects.contains { $0.string("ingestStatus") == "ingesting" }
+        projects.contains { Self.isInProgressIngest($0.string("ingestStatus")) }
+    }
+
+    /// Whether an `ingestStatus` value represents work still in flight.
+    static func isInProgressIngest(_ status: String?) -> Bool {
+        status == "queued" || status == "ingesting"
+    }
+
+    /// Localized label for an async ingest status (queued → ingesting → ready).
+    func ingestStatusLabel(_ status: String?) -> String {
+        switch status ?? "none" {
+        case "ready": return t("ingest_ready")
+        case "ingesting": return t("ingest_ingesting")
+        case "queued": return t("ingest_queued")
+        case "error": return t("ingest_error")
+        default: return t("ingest_none")
+        }
     }
 
     init(
-        keychain: KeychainStore = KeychainStore(),
-        api: APIClient = APIClient(baseURL: AppConfig.apiBaseURL)
+        keychain: SessionStoring = KeychainStore(),
+        api: APIClient = APIClient(baseURL: AppConfig.apiBaseURL),
+        firebaseAuth: FirebaseSignIn = LiveFirebaseSignIn()
     ) {
         self.keychain = keychain
         self.api = api
+        self.firebaseAuth = firebaseAuth
     }
 
     func boot() async {
         firebaseStatus = FirebaseBootstrap.configure()
 
-        session = keychain.loadSession()
+        session = keychain.loadSession(username: "Saved user")
 
         if session != nil {
             await refreshAll()
@@ -57,6 +79,30 @@ final class AppModel {
     func login(username: String, password: String) async {
         await runLoading {
             let response = try await api.login(username: username, password: password)
+            try keychain.save(token: response.token)
+            session = Session(token: response.token, username: response.user.username)
+            await refreshAll()
+        }
+    }
+
+    /// Core Firebase transport: exchange an already-obtained Firebase ID token
+    /// for a GHOST session bearer via `POST /auth/firebase`, then persist the
+    /// session token in the Keychain exactly like the password flow.
+    func signInWithFirebase(idToken: String) async {
+        await runLoading {
+            let response = try await api.authFirebase(idToken: idToken)
+            try keychain.save(token: response.token)
+            session = Session(token: response.token, username: response.user.username)
+            await refreshAll()
+        }
+    }
+
+    /// Convenience sign-in: obtain a Firebase ID token from email/password via
+    /// the Firebase SDK, then run the standard `/auth/firebase` exchange.
+    func signInWithFirebaseEmail(email: String, password: String) async {
+        await runLoading {
+            let idToken = try await firebaseAuth.idToken(email: email, password: password)
+            let response = try await api.authFirebase(idToken: idToken)
             try keychain.save(token: response.token)
             session = Session(token: response.token, username: response.user.username)
             await refreshAll()
@@ -86,6 +132,8 @@ final class AppModel {
         skills = []
         projects = []
         plans = []
+        builds = []
+        memoryChunks = []
         output = [:]
         loading = []
         selectedTopic = ""
@@ -138,6 +186,15 @@ final class AppModel {
             break
         case .design, .plan:
             await loadProjects()
+        case .build:
+            await loadProjects()
+            if !selectedProject.isEmpty {
+                await loadPlans(projectId: selectedProject)
+                await loadBuilds(projectId: selectedProject)
+            }
+        case .memory:
+            await loadTopics()
+            await loadMemory()
         case .settings:
             await loadKeys()
         }
@@ -243,7 +300,10 @@ final class AppModel {
     func selectProject(_ id: String) {
         selectedProject = id
         syncSelectedProjectSkills()
-        Task { await loadPlans(projectId: id) }
+        Task {
+            await loadPlans(projectId: id)
+            await loadBuilds(projectId: id)
+        }
     }
 
     func createTopic(name: String, description: String) async {
@@ -499,6 +559,81 @@ final class AppModel {
             }
         }
         await loadPlans()
+        await loadDashboard()
+    }
+
+    // MARK: - Build parity (CONTRACT v2.2 / v3.1)
+
+    /// Load prior build runs for a project via `GET /builds?projectId=...`.
+    func loadBuilds(projectId: String? = nil) async {
+        let projectId = projectId ?? selectedProject
+        guard !projectId.isEmpty else {
+            builds = []
+            return
+        }
+        do {
+            builds = try await authed { token in
+                try await api.getJSON(path: "/builds?projectId=\(Self.escape(projectId))", token: token)
+            }.array("runs")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Trigger a real-development build via `POST /projects/{id}/build`. The
+    /// response holds the generated files, summary and sandbox verification.
+    func build(planId: String, instructions: String) async {
+        guard !selectedProject.isEmpty else { return }
+        await run("build") {
+            try await authed { token in
+                try await api.postJSON(path: "/projects/\(selectedProject)/build", body: [
+                    "planId": planId.isEmpty ? .null : .string(planId),
+                    "instructions": instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? .null
+                        : .string(instructions.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "lang": .string(lang.rawValue)
+                ], token: token)
+            }
+        }
+        await loadBuilds()
+        await loadDashboard()
+    }
+
+    /// Open a single owned build run together with its artifacts via
+    /// `GET /builds/{id}`. Stored under `buildOpen` so the UI can render files.
+    func openBuild(id: String) async {
+        await run("buildOpen") {
+            try await authed { token in
+                try await api.getJSON(path: "/builds/\(Self.escape(id))", token: token)
+            }
+        }
+    }
+
+    // MARK: - Memory transparency (CONTRACT v3.6)
+
+    /// List the user's stored knowledge chunks via `GET /memory`, optionally
+    /// narrowed to a topic and/or project. The raw embedding is never returned.
+    func loadMemory(topicId: String? = nil, projectId: String? = nil) async {
+        var query: [String] = []
+        let topic = topicId ?? (selectedTopic.isEmpty ? nil : selectedTopic)
+        if let topic, !topic.isEmpty { query.append("topicId=\(Self.escape(topic))") }
+        if let projectId, !projectId.isEmpty { query.append("projectId=\(Self.escape(projectId))") }
+        let path = query.isEmpty ? "/memory" : "/memory?\(query.joined(separator: "&"))"
+        do {
+            memoryChunks = try await authed { token in
+                try await api.getJSON(path: path, token: token)
+            }.array("chunks")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Delete a single owned knowledge chunk via `DELETE /memory/{id}`.
+    func deleteMemoryChunk(_ id: String) async {
+        await run("del-memory-\(id)") {
+            try await authed { token in try await api.deleteJSON(path: "/memory/\(Self.escape(id))", token: token) }
+        }
+        await loadMemory()
         await loadDashboard()
     }
 

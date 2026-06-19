@@ -180,19 +180,22 @@ enum StepKey: String, CaseIterable, Identifiable {
     case ask
     case design
     case plan
+    case build
+    case memory
     case settings
 
     var id: String { rawValue }
 
     var number: String {
         switch self {
-        case .overview, .settings: return "•"
+        case .overview, .memory, .settings: return "•"
         case .sources: return "1"
         case .skills: return "2"
         case .projects: return "3"
         case .ask: return "4"
         case .design: return "5"
         case .plan: return "6"
+        case .build: return "7"
         }
     }
 
@@ -205,6 +208,8 @@ enum StepKey: String, CaseIterable, Identifiable {
         case .ask: return "bubble.left.and.text.bubble.right"
         case .design: return "chart.line.uptrend.xyaxis"
         case .plan: return "chevron.left.forwardslash.chevron.right"
+        case .build: return "hammer"
+        case .memory: return "memorychip"
         case .settings: return "key"
         }
     }

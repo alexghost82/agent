@@ -29,6 +29,33 @@ export const LoginSchema = z.object({
   password: z.string().min(1).max(512)
 });
 
+// iOS/mobile: exchange a verified Firebase Auth ID token for a GHOST session.
+export const FirebaseAuthSchema = z.object({
+  idToken: z.string().min(10).max(8192)
+});
+
+export const ChangePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(512),
+  newPassword: z.string().min(8).max(512)
+});
+
+// User management v2 (SECURITY): admin-issued invites, invite redemption, roles.
+export const CreateInviteSchema = z.object({
+  role: z.enum(["admin", "member"]).optional(),
+  // Optional expiry in hours (default applied server-side).
+  expiresInHours: z.number().int().min(1).max(8760).optional()
+});
+
+export const AcceptInviteSchema = z.object({
+  code: z.string().min(8).max(128),
+  username: z.string().min(2).max(NAME_MAX),
+  password: z.string().min(8).max(512)
+});
+
+export const UpdateRoleSchema = z.object({
+  role: z.enum(["admin", "member"])
+});
+
 export const TopicSchema = z.object({
   name: z.string().min(2).max(NAME_MAX),
   description: z.string().max(DESC_MAX).optional()
@@ -37,7 +64,10 @@ export const TopicSchema = z.object({
 export const LearnSchema = z.object({
   topicId: z.string().min(3).max(ID_MAX),
   url: z.string().url().max(URL_MAX),
-  tags: tags.optional()
+  tags: tags.optional(),
+  // Deep ingest (CONTRACT v3.5): bounded same-origin crawl. Default false keeps
+  // the single-page behaviour (fully backward compatible).
+  deep: z.boolean().optional()
 });
 
 export const ExtractSkillsSchema = z.object({ topicId: z.string().min(3).max(ID_MAX) });
@@ -46,7 +76,11 @@ export const SkillSchema = z.object({
   topicId: z.string().min(3).max(ID_MAX),
   skillName: z.string().min(2).max(NAME_MAX),
   description: z.string().min(5).max(DESC_MAX),
-  example: z.string().max(EXAMPLE_MAX).optional()
+  example: z.string().max(EXAMPLE_MAX).optional(),
+  // Skill v2 (CONTRACT v3.3): which stacks/tags the skill applies to and an
+  // optional reusable template the build step can apply. Backward compatible.
+  appliesTo: tags.optional(),
+  template: z.string().max(EXAMPLE_MAX).optional()
 });
 
 export const AskSchema = z.object({
@@ -102,7 +136,9 @@ export const BuildSchema = z.object({
 export const ApiKeysSchema = z.object({
   openai: z.string().regex(/^sk-/, "OpenAI key must start with sk-").max(KEY_MAX).nullable().optional(),
   gemini: z.string().regex(/^AIza/, "Gemini key must start with AIza").max(KEY_MAX).nullable().optional(),
-  provider: z.enum(["openai", "gemini"]).optional()
+  anthropic: z.string().regex(/^sk-ant-/, "Anthropic key must start with sk-ant-").max(KEY_MAX).nullable().optional(),
+  azure: z.string().min(8).max(KEY_MAX).nullable().optional(),
+  provider: z.enum(["openai", "gemini", "anthropic", "azure-openai"]).optional()
 });
 
-export const TestKeySchema = z.object({ provider: z.enum(["openai", "gemini"]) });
+export const TestKeySchema = z.object({ provider: z.enum(["openai", "gemini", "anthropic", "azure-openai"]) });

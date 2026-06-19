@@ -9,7 +9,14 @@ import {
   tsMillis,
   sanitizeArtifactPath,
   detectLanguage,
-  normalizeBuildFiles
+  normalizeBuildFiles,
+  contentHash,
+  selectVectorBackend,
+  scoreExtractedSkill,
+  sameOrigin,
+  parseSitemapUrls,
+  resolveCrawlUrl,
+  staticBuildChecks
 } from "../src/pure";
 
 describe("chunkText", () => {
@@ -144,5 +151,73 @@ describe("normalizeBuildFiles (build, CONTRACT v2.2)", () => {
   it("returns [] for non-array / invalid input", () => {
     expect(normalizeBuildFiles(null, 40, 100_000)).toEqual([]);
     expect(normalizeBuildFiles([{ path: 1, content: 2 }], 40, 100_000)).toEqual([]);
+  });
+});
+
+describe("contentHash (dedup, CONTRACT v2.1/v3.4)", () => {
+  it("is stable under whitespace normalization", () => {
+    expect(contentHash("hello   world")).toBe(contentHash("hello world"));
+    expect(contentHash("  hello world\n")).toBe(contentHash("hello world"));
+  });
+  it("differs for different content", () => {
+    expect(contentHash("a")).not.toBe(contentHash("b"));
+  });
+});
+
+describe("selectVectorBackend (CONTRACT v3.2)", () => {
+  it("only opts into firestore on the explicit flag", () => {
+    expect(selectVectorBackend("firestore")).toBe("firestore");
+    expect(selectVectorBackend("memory")).toBe("memory");
+    expect(selectVectorBackend(undefined)).toBe("memory");
+    expect(selectVectorBackend("anything")).toBe("memory");
+  });
+});
+
+describe("scoreExtractedSkill (CONTRACT v3.3)", () => {
+  it("scores a rich skill high and a thin one low", () => {
+    const good = scoreExtractedSkill({
+      skillName: "Use Firestore composite indexes",
+      description: "Always add composite indexes for where+orderBy queries to avoid runtime failures.",
+      example: "where(userId).orderBy(createdAt)",
+      template: "db.collection(c).where(...).orderBy(...)",
+      appliesTo: ["firestore"]
+    });
+    expect(good.score).toBeGreaterThanOrEqual(0.9);
+    const bad = scoreExtractedSkill({ skillName: "x", description: "short" });
+    expect(bad.score).toBeLessThan(0.3);
+  });
+});
+
+describe("deep-ingest helpers (CONTRACT v3.5)", () => {
+  it("sameOrigin compares host", () => {
+    expect(sameOrigin("https://a.com/x", "https://a.com/y")).toBe(true);
+    expect(sameOrigin("https://a.com", "https://b.com")).toBe(false);
+    expect(sameOrigin("not a url", "https://a.com")).toBe(false);
+  });
+  it("parses sitemap <loc> urls", () => {
+    const xml = "<urlset><url><loc>https://a.com/1</loc></url><url><loc> https://a.com/2 </loc></url></urlset>";
+    expect(parseSitemapUrls(xml)).toEqual(["https://a.com/1", "https://a.com/2"]);
+  });
+  it("resolves relative urls and drops fragments / non-http", () => {
+    expect(resolveCrawlUrl("/docs", "https://a.com/x")).toBe("https://a.com/docs");
+    expect(resolveCrawlUrl("page#frag", "https://a.com/x/")).toBe("https://a.com/x/page");
+    expect(resolveCrawlUrl("mailto:x@y.com", "https://a.com")).toBeNull();
+  });
+});
+
+describe("staticBuildChecks (CONTRACT v3.1)", () => {
+  const mk = (path: string, content: string) => ({ path, content, language: null, bytes: content.length });
+  it("passes for a coherent file set", () => {
+    const checks = staticBuildChecks([mk("package.json", '{"name":"x"}'), mk("src/index.ts", "export const x = 1;")]);
+    expect(checks.every((c) => c.ok)).toBe(true);
+  });
+  it("flags invalid JSON and a missing entry", () => {
+    const checks = staticBuildChecks([mk("config.json", "{not json")]);
+    const byName = Object.fromEntries(checks.map((c) => [c.name, c.ok]));
+    expect(byName.json_parses).toBe(false);
+    expect(byName.entry_present).toBe(false);
+  });
+  it("flags empty file set", () => {
+    expect(staticBuildChecks([]).find((c) => c.name === "files_present")!.ok).toBe(false);
   });
 });

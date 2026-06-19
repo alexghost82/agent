@@ -549,7 +549,7 @@ private struct ProjectFullRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(5)
                     }
-                    if project.string("ingestStatus") == "ingesting" {
+                    if AppModel.isInProgressIngest(project.string("ingestStatus")) {
                         IngestProgress(project: project)
                     }
                     HStack {
@@ -581,18 +581,13 @@ private struct ProjectFullRow: View {
     }
 
     private var statusLabel: String {
-        switch project.string("ingestStatus") ?? "none" {
-        case "ready": return model.t("ingest_ready")
-        case "ingesting": return model.t("ingest_ingesting")
-        case "error": return model.t("ingest_error")
-        default: return model.t("ingest_none")
-        }
+        model.ingestStatusLabel(project.string("ingestStatus"))
     }
 
     private var statusColor: Color {
         switch project.string("ingestStatus") ?? "none" {
         case "ready": return BrandTheme.ColorToken.ok
-        case "ingesting": return BrandTheme.ColorToken.warn
+        case "queued", "ingesting": return BrandTheme.ColorToken.warn
         case "error": return BrandTheme.ColorToken.danger
         default: return BrandTheme.ColorToken.accent
         }
@@ -994,6 +989,325 @@ private struct GeneratedBlock: View {
     }
 }
 
+// MARK: - Build parity panel (web `BuildPanel`)
+
+struct BuildParityPanel: View {
+    @Environment(AppModel.self) private var model
+    @State private var planId = ""
+    @State private var instructions = ""
+    @State private var openingId = ""
+
+    private var buildOutput: JSONValue? { model.output["build"] }
+    private var buildFiles: [JSONValue] { buildOutput?.array("files") ?? [] }
+    private var buildSummary: String? { buildOutput?.string("summary") }
+    private var verification: JSONValue? {
+        guard case let .object(object)? = buildOutput?.objectValue?["verification"] else { return nil }
+        return .object(object)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Explain(model.t("buildExplain"))
+            ProjectPicker()
+            BrandCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(model.t("selectPlanLabel"))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Picker(model.t("selectPlanLabel"), selection: $planId) {
+                        Text(model.t("planOptionNone")).tag("")
+                        ForEach(model.plans) { plan in
+                            Text(plan.string("title") ?? plan.string("summary") ?? (plan.string("id") ?? "Plan")).tag(plan.string("id") ?? "")
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    TextField(model.t("instructionsLabel"), text: $instructions, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(3...8)
+                    Button {
+                        Task { await model.build(planId: planId, instructions: instructions) }
+                    } label: {
+                        Label(model.loading.contains("build") ? model.t("building") : model.t("buildBtn"), systemImage: "hammer")
+                    }
+                    .buttonStyle(PrimaryBrandButtonStyle())
+                    .disabled(model.selectedProject.isEmpty || model.loading.contains("build"))
+                }
+            }
+
+            if model.loading.contains("build") || buildOutput?.object("error") != nil {
+                ResultBox(key: "build", emptyText: model.t("noBuildYet"))
+            } else if buildFiles.isEmpty && (buildSummary?.isEmpty ?? true) {
+                ResultBox(key: "build", emptyText: model.t("noBuildYet"))
+            } else {
+                if let summary = buildSummary, !summary.isEmpty {
+                    ListBlock(title: model.t("buildSummary")) {
+                        BrandCard {
+                            Text(summary)
+                                .font(.subheadline)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                if let verification {
+                    VerificationView(verification: verification)
+                }
+                if !buildFiles.isEmpty {
+                    ListBlock(title: "\(model.t("generatedFiles")) (\(buildFiles.count))") {
+                        ForEach(buildFiles) { file in
+                            GeneratedBlock(title: file.string("path") ?? "file", content: file.string("content") ?? "", shareName: file.string("path") ?? "file")
+                        }
+                    }
+                }
+            }
+
+            ListBlock(title: model.t("pastBuilds"), refresh: { Task { await model.loadBuilds() } }) {
+                if model.builds.isEmpty {
+                    Text(model.t("noBuildsYet")).foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.builds) { run in
+                        BuildRunRow(run: run, openingId: $openingId)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct BuildRunRow: View {
+    @Environment(AppModel.self) private var model
+    let run: JSONValue
+    @Binding var openingId: String
+
+    private var id: String { run.string("id") ?? "" }
+    private var openOutput: JSONValue? { model.output["buildOpen"] }
+    private var openRun: JSONValue? { openOutput?.objectValue?["run"].flatMap { $0.objectValue }.map(JSONValue.object) }
+    private var openArtifacts: [JSONValue] { openOutput?.array("artifacts") ?? [] }
+    private var isOpenLoading: Bool { openingId == id && model.loading.contains("buildOpen") }
+    private var showOpened: Bool {
+        openingId == id && !model.loading.contains("buildOpen") && openRun?.string("id") == id
+    }
+
+    var body: some View {
+        BrandCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    Text(run.string("summary") ?? id)
+                        .font(.subheadline.weight(.heavy))
+                        .lineLimit(2)
+                    Spacer()
+                    StatusChip(title: statusLabel, systemImage: "circle.dotted", color: statusColor)
+                }
+                HStack {
+                    StatusChip(title: "\(run.int("fileCount") ?? 0) \(model.t("buildFilesCount"))", systemImage: "doc.text", color: BrandTheme.ColorToken.accent)
+                    Spacer()
+                    Button(model.t("openBuildBtn"), systemImage: "arrow.up.forward.app") {
+                        openingId = id
+                        Task { await model.openBuild(id: id) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.loading.contains("buildOpen") || id.isEmpty)
+                }
+                if isOpenLoading {
+                    HStack { ProgressView(); Text(model.t("working")) }
+                        .foregroundStyle(.secondary)
+                } else if showOpened {
+                    if let error = openOutput?.string("error") {
+                        Text("\(model.t("errorWord")): \(error)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(BrandTheme.ColorToken.danger)
+                    } else {
+                        Text("\(model.t("generatedFiles")) (\(openArtifacts.count))")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(BrandTheme.ColorToken.accent)
+                        ForEach(openArtifacts) { artifact in
+                            GeneratedBlock(title: artifact.string("path") ?? "file", content: artifact.string("content") ?? "", shareName: artifact.string("path") ?? "file")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var statusLabel: String {
+        let status = run.string("status") ?? ""
+        let mapped = model.t.g("buildStatus", status)
+        return mapped == status && status.isEmpty ? model.t("ingest_none") : mapped
+    }
+
+    private var statusColor: Color {
+        switch run.string("status") ?? "" {
+        case "ready": return BrandTheme.ColorToken.ok
+        case "running": return BrandTheme.ColorToken.warn
+        case "error": return BrandTheme.ColorToken.danger
+        default: return BrandTheme.ColorToken.accent
+        }
+    }
+}
+
+private struct VerificationView: View {
+    @Environment(AppModel.self) private var model
+    let verification: JSONValue
+
+    private var status: String { verification.string("status") ?? "" }
+    private var checks: [JSONValue] { verification.array("checks") }
+
+    var body: some View {
+        BrandCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(model.t("verificationLabel"))
+                        .font(.headline.weight(.black))
+                    Spacer()
+                    StatusChip(title: statusLabel, systemImage: statusIcon, color: statusColor)
+                }
+                if let summary = verification.string("summary"), !summary.isEmpty {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(checks) { check in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: (check.objectValue?["ok"] == .bool(true)) ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                            .foregroundStyle((check.objectValue?["ok"] == .bool(true)) ? BrandTheme.ColorToken.ok : BrandTheme.ColorToken.danger)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(check.string("name") ?? "check").font(.caption.weight(.heavy))
+                            if let detail = check.string("detail"), !detail.isEmpty {
+                                Text(detail).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(3)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var statusLabel: String {
+        switch status {
+        case "passed": return model.t("verifyStatusPassed")
+        case "failed": return model.t("verifyStatusFailed")
+        case "skipped": return model.t("verifyStatusSkipped")
+        default: return model.t("verifyStatusError")
+        }
+    }
+
+    private var statusIcon: String {
+        switch status {
+        case "passed": return "checkmark.seal.fill"
+        case "failed": return "xmark.seal.fill"
+        default: return "questionmark.circle"
+        }
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case "passed": return BrandTheme.ColorToken.ok
+        case "failed", "error": return BrandTheme.ColorToken.danger
+        default: return BrandTheme.ColorToken.warn
+        }
+    }
+}
+
+// MARK: - Memory transparency panel (CONTRACT v3.6)
+
+struct MemoryParityPanel: View {
+    @Environment(AppModel.self) private var model
+    @State private var search = ""
+    @State private var page = 0
+
+    private let pageSize = 8
+
+    private var filtered: [JSONValue] {
+        let term = search.trimmingCharacters(in: .whitespaces)
+        guard !term.isEmpty else { return model.memoryChunks }
+        return model.memoryChunks.filter {
+            "\($0.string("title") ?? "") \($0.string("preview") ?? "") \($0.string("sourceUrl") ?? "") \($0.string("sourcePath") ?? "")"
+                .localizedCaseInsensitiveContains(term)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Explain(model.t("memoryExplain"))
+            BrandCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker(model.t("memoryFilterTopic"), selection: Binding(get: { model.selectedTopic }, set: { id in
+                        model.selectedTopic = id
+                        Task { await model.loadMemory() }
+                    })) {
+                        Text(model.t("memoryAllTopics")).tag("")
+                        ForEach(model.topics) { Text($0.string("name") ?? "Untitled").tag($0.string("id") ?? "") }
+                    }
+                    .pickerStyle(.menu)
+                    TextField(model.t("memorySearch"), text: $search)
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+            }
+            ListBlock(title: "\(model.t.g("stepTitle", "memory")) (\(filtered.count))", refresh: { Task { await model.loadMemory() } }) {
+                if filtered.isEmpty {
+                    Text(model.t("memoryEmpty")).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(pagedSlice(filtered, page: page, size: pageSize))) { chunk in
+                        MemoryRow(chunk: chunk)
+                    }
+                    PaginationBar(
+                        page: min(page, pageCount(filtered.count, size: pageSize) - 1),
+                        pageCount: pageCount(filtered.count, size: pageSize),
+                        onPrev: { page = max(0, page - 1) },
+                        onNext: { page = min(pageCount(filtered.count, size: pageSize) - 1, page + 1) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct MemoryRow: View {
+    @Environment(AppModel.self) private var model
+    let chunk: JSONValue
+    @State private var confirmDelete = false
+
+    var body: some View {
+        BrandCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top) {
+                    Image(systemName: "memorychip").foregroundStyle(BrandTheme.ColorToken.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(chunk.string("title") ?? chunk.string("sourcePath") ?? model.t("memoryUntitled"))
+                            .font(.subheadline.weight(.heavy))
+                        if let url = chunk.string("sourceUrl"), !url.isEmpty {
+                            Text(url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                }
+                if let scope = chunk.string("scope"), !scope.isEmpty {
+                    StatusChip(title: scope, systemImage: "scope", color: BrandTheme.ColorToken.accent)
+                } else if let type = chunk.string("chunkType"), !type.isEmpty {
+                    StatusChip(title: type, systemImage: "tag", color: BrandTheme.ColorToken.accent)
+                }
+                if let preview = chunk.string("preview"), !preview.isEmpty {
+                    Text(preview)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(5)
+                        .textSelection(.enabled)
+                }
+                Button(model.t("delete"), systemImage: "trash", role: .destructive) { confirmDelete = true }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .confirmationDialog(model.t("confirmDelete"), isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button(model.t("delete"), role: .destructive) {
+                if let id = chunk.string("id") { Task { await model.deleteMemoryChunk(id) } }
+            }
+            Button(model.t("cancel"), role: .cancel) {}
+        }
+    }
+}
+
 // MARK: - Shared parity helpers (pagination, ingest progress)
 
 /// Client-side pagination control, mirrors the web `Pagination` component.
@@ -1042,6 +1356,7 @@ private struct IngestProgress: View {
     @Environment(AppModel.self) private var model
     let project: JSONValue
 
+    private var isQueued: Bool { project.string("ingestStatus") == "queued" }
     private var done: Int { project.int("ingestedFiles") ?? 0 }
     private var total: Int {
         project.int("ingestTotalFiles") ?? project.int("totalFiles") ?? project.int("ingestTotal") ?? 0
@@ -1051,11 +1366,21 @@ private struct IngestProgress: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("\(model.t("ingestProgress")) — \(done)\(total > 0 ? " / \(total)" : "") \(model.t("filesSoFar"))")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BrandTheme.ColorToken.warn)
+                if isQueued {
+                    Text(model.t("ingest_queued"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BrandTheme.ColorToken.warn)
+                } else {
+                    Text("\(model.t("ingestProgress")) — \(done)\(total > 0 ? " / \(total)" : "") \(model.t("filesSoFar"))")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BrandTheme.ColorToken.warn)
+                }
             }
-            if total > 0 {
+            if isQueued {
+                // Queued work has not produced files yet — show an indeterminate bar.
+                ProgressView(value: 0.08)
+                    .tint(BrandTheme.ColorToken.accent)
+            } else if total > 0 {
                 ProgressView(value: Double(min(done, total)), total: Double(total))
                     .tint(BrandTheme.ColorToken.accent)
             } else {

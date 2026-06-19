@@ -1,6 +1,7 @@
 import * as net from "net";
 import { lookup } from "dns/promises";
 import * as cheerio from "cheerio";
+import { sameOrigin, parseSitemapUrls, resolveCrawlUrl } from "./pure";
 
 export function isPrivateIp(ip: string): boolean {
   const type = net.isIP(ip);
@@ -60,6 +61,19 @@ export async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
   return url;
 }
 
+// Same-origin <a href> links found in an HTML body, resolved to absolute URLs.
+export function extractLinks(html: string, baseUrl: string): string[] {
+  const $ = cheerio.load(html);
+  const out = new Set<string>();
+  $("a[href]").each((_i, el) => {
+    const href = $(el).attr("href");
+    if (!href) return;
+    const abs = resolveCrawlUrl(href, baseUrl);
+    if (abs && sameOrigin(abs, baseUrl)) out.add(abs);
+  });
+  return [...out];
+}
+
 export async function readUrl(rawUrl: string): Promise<{ title: string; text: string }> {
   await assertPublicHttpUrl(rawUrl);
   const controller = new AbortController();
@@ -71,7 +85,17 @@ export async function readUrl(rawUrl: string): Promise<{ title: string; text: st
       redirect: "follow"
     });
     if (!response.ok) throw new Error(`Failed to fetch ${rawUrl}: ${response.status}`);
-    const html = (await response.text()).slice(0, 3_000_000);
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    const raw = await response.text();
+
+    // PDFs are served as text/plain extraction best-effort: many docs hosts
+    // return an HTML viewer, so we still parse as HTML when it is not a real PDF.
+    if (contentType.includes("application/pdf")) {
+      const text = raw.replace(/[^\x20-\x7E\s]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160000);
+      return { title: rawUrl, text };
+    }
+
+    const html = raw.slice(0, 3_000_000);
     const $ = cheerio.load(html);
     $("script, style, nav, footer, header, noscript, svg").remove();
     const title = $("title").text().trim() || rawUrl;
@@ -80,4 +104,64 @@ export async function readUrl(rawUrl: string): Promise<{ title: string; text: st
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export interface CrawledPage {
+  url: string;
+  title: string;
+  text: string;
+}
+
+// Bounded, same-origin crawl (CONTRACT v3.5). Seeds from sitemap.xml + in-page
+// links, BFS up to maxDepth, capped at maxPages. Every fetched URL passes the
+// SSRF guard via readUrl/assertPublicHttpUrl. Failures on individual pages are
+// skipped so one bad link does not abort the crawl.
+export async function crawlSite(
+  rootUrl: string,
+  opts: { maxPages?: number; maxDepth?: number } = {}
+): Promise<CrawledPage[]> {
+  const maxPages = Math.max(1, opts.maxPages ?? (Number(process.env.INGEST_MAX_PAGES) || 20));
+  const maxDepth = Math.max(0, opts.maxDepth ?? (Number(process.env.INGEST_MAX_DEPTH) || 2));
+
+  const visited = new Set<string>();
+  const pages: CrawledPage[] = [];
+  const queue: { url: string; depth: number }[] = [{ url: rootUrl, depth: 0 }];
+
+  // Seed additional URLs from the sitemap when reachable.
+  try {
+    const origin = new URL(rootUrl).origin;
+    const smRes = await fetch(`${origin}/sitemap.xml`, {
+      headers: { "User-Agent": "GHOST-Agent-Builder/1.0 (read-only)" }
+    });
+    if (smRes.ok) {
+      for (const u of parseSitemapUrls(await smRes.text())) {
+        if (sameOrigin(u, rootUrl)) queue.push({ url: u, depth: 1 });
+      }
+    }
+  } catch {
+    /* no sitemap — fall back to link crawl */
+  }
+
+  while (queue.length && pages.length < maxPages) {
+    const { url, depth } = queue.shift()!;
+    const norm = url.split("#")[0];
+    if (visited.has(norm)) continue;
+    visited.add(norm);
+    try {
+      await assertPublicHttpUrl(norm);
+      const page = await readUrl(norm);
+      pages.push({ url: norm, title: page.title, text: page.text });
+      if (depth < maxDepth && pages.length < maxPages) {
+        const res = await fetch(norm, { headers: { "User-Agent": "GHOST-Agent-Builder/1.0 (read-only)" } });
+        if (res.ok) {
+          for (const link of extractLinks((await res.text()).slice(0, 3_000_000), norm)) {
+            if (!visited.has(link.split("#")[0])) queue.push({ url: link, depth: depth + 1 });
+          }
+        }
+      }
+    } catch {
+      /* skip unreachable / blocked page */
+    }
+  }
+  return pages;
 }

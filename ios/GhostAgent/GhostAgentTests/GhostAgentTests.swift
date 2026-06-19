@@ -11,12 +11,310 @@ final class GhostAgentTests: XCTestCase {
         XCTAssertEqual(envelope.requestId, "req_123")
     }
 
-    func testDefaultAPIBaseURLTargetsFunctionsAPI() {
-        XCTAssertTrue(AppConfig.apiBaseURL.absoluteString.contains("/us-central1/api"))
+    func testDefaultAPIBaseURLEndsWithAPIPath() {
+        // The base URL is sourced from Info.plist (GHOST_API_BASE_URL) and must
+        // point at the shared `/api` surface the web client also uses.
+        XCTAssertTrue(AppConfig.apiBaseURL.absoluteString.hasSuffix("/api"))
     }
 
     func testFirebaseStatusTitlesAreUserVisible() {
         XCTAssertEqual(FirebaseStatus.missingConfig.title, "Missing GoogleService-Info.plist")
         XCTAssertEqual(FirebaseStatus.sdkUnavailable.title, "Firebase SDK unavailable")
+    }
+}
+
+// MARK: - Async ingest status mapping (CONTRACT: queued → ingesting → ready)
+
+@MainActor
+final class IngestStatusTests: XCTestCase {
+    func testInProgressIncludesQueuedAndIngesting() {
+        XCTAssertTrue(AppModel.isInProgressIngest("queued"))
+        XCTAssertTrue(AppModel.isInProgressIngest("ingesting"))
+        XCTAssertFalse(AppModel.isInProgressIngest("ready"))
+        XCTAssertFalse(AppModel.isInProgressIngest("error"))
+        XCTAssertFalse(AppModel.isInProgressIngest(nil))
+    }
+
+    func testIsIngestingReflectsQueuedProjects() {
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+        model.projects = [.object(["id": .string("p1"), "ingestStatus": .string("queued")])]
+        XCTAssertTrue(model.isIngesting)
+        model.projects = [.object(["id": .string("p1"), "ingestStatus": .string("ready")])]
+        XCTAssertFalse(model.isIngesting)
+    }
+
+    func testStatusLabelMappingIncludesQueuedAcrossLanguages() {
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+
+        model.lang = .en
+        XCTAssertEqual(model.ingestStatusLabel("queued"), "queued…")
+        XCTAssertEqual(model.ingestStatusLabel("ingesting"), "reading…")
+        XCTAssertEqual(model.ingestStatusLabel("ready"), "understood")
+        XCTAssertEqual(model.ingestStatusLabel("error"), "error")
+        XCTAssertEqual(model.ingestStatusLabel(nil), "not connected")
+
+        model.lang = .he
+        XCTAssertEqual(model.ingestStatusLabel("queued"), "בתור…")
+        model.lang = .ru
+        XCTAssertEqual(model.ingestStatusLabel("queued"), "в очереди…")
+    }
+}
+
+// MARK: - Build & memory response decoding (parity with backend shapes)
+
+final class BuildMemoryDecodingTests: XCTestCase {
+    func testBuildResponseExposesFilesSummaryAndVerification() throws {
+        let json = #"""
+        {
+          "id": "run_1",
+          "status": "ready",
+          "fileCount": 2,
+          "summary": "Generated a starter app.",
+          "files": [
+            {"path": "README.md", "content": "# Hello", "language": "markdown", "bytes": 7},
+            {"path": "src/index.ts", "content": "export const x = 1;", "language": "ts", "bytes": 19}
+          ],
+          "verification": {
+            "status": "passed",
+            "summary": "Verified 2 file(s).",
+            "durationMs": 12,
+            "checks": [
+              {"name": "sandbox_contained", "ok": true},
+              {"name": "tsc", "ok": false, "detail": "exit 2"}
+            ]
+          }
+        }
+        """#.data(using: .utf8)!
+
+        let value = try JSONDecoder().decode(JSONValue.self, from: json)
+
+        XCTAssertEqual(value.string("status"), "ready")
+        XCTAssertEqual(value.int("fileCount"), 2)
+        XCTAssertEqual(value.string("summary"), "Generated a starter app.")
+
+        let files = value.array("files")
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(files.first?.string("path"), "README.md")
+        XCTAssertEqual(files.first?.string("content"), "# Hello")
+
+        let verification = value.object("verification")
+        XCTAssertEqual(verification?.string("status"), "passed")
+        let checks = JSONValue.object(verification ?? [:]).array("checks")
+        XCTAssertEqual(checks.count, 2)
+        XCTAssertEqual(checks.first?.string("name"), "sandbox_contained")
+        XCTAssertEqual(checks.first?.objectValue?["ok"], .bool(true))
+        XCTAssertEqual(checks.last?.objectValue?["ok"], .bool(false))
+        XCTAssertEqual(checks.last?.string("detail"), "exit 2")
+    }
+
+    func testBuildsListResponseDecodesRuns() throws {
+        let json = #"{"runs":[{"id":"r1","status":"ready","fileCount":3,"summary":"S1"},{"id":"r2","status":"error","fileCount":0,"summary":"S2"}]}"#.data(using: .utf8)!
+        let value = try JSONDecoder().decode(JSONValue.self, from: json)
+        let runs = value.array("runs")
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertEqual(runs.first?.string("id"), "r1")
+        XCTAssertEqual(runs.first?.int("fileCount"), 3)
+        XCTAssertEqual(runs.last?.string("status"), "error")
+    }
+
+    func testBuildOpenResponseDecodesRunAndArtifacts() throws {
+        let json = #"{"run":{"id":"r1","projectName":"Demo"},"artifacts":[{"id":"a1","path":"a.ts","content":"x"}]}"#.data(using: .utf8)!
+        let value = try JSONDecoder().decode(JSONValue.self, from: json)
+        XCTAssertEqual(value.object("run")?.string("id"), "r1")
+        let artifacts = value.array("artifacts")
+        XCTAssertEqual(artifacts.count, 1)
+        XCTAssertEqual(artifacts.first?.string("path"), "a.ts")
+    }
+
+    func testMemoryResponseDecodesChunks() throws {
+        let json = #"""
+        {"chunks":[
+          {"id":"c1","title":"Auth","sourceUrl":"https://x/auth","preview":"how to auth","scope":"topic","chunkType":"doc"},
+          {"id":"c2","title":null,"sourcePath":"src/a.ts","preview":"code","projectId":"p1"}
+        ]}
+        """#.data(using: .utf8)!
+        let value = try JSONDecoder().decode(JSONValue.self, from: json)
+        let chunks = value.array("chunks")
+        XCTAssertEqual(chunks.count, 2)
+        XCTAssertEqual(chunks.first?.string("title"), "Auth")
+        XCTAssertEqual(chunks.first?.string("preview"), "how to auth")
+        XCTAssertEqual(chunks.first?.string("scope"), "topic")
+        // Null title falls back to sourcePath in the UI row.
+        XCTAssertNil(chunks.last?.string("title"))
+        XCTAssertEqual(chunks.last?.string("sourcePath"), "src/a.ts")
+    }
+}
+
+// MARK: - Firebase ID-token sign-in path
+
+@MainActor
+final class FirebaseSignInTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        StubURLProtocol.reset()
+    }
+
+    func testSignInWithFirebaseStoresTokenAndLoadsSession() async {
+        StubURLProtocol.responder = { req in
+            if (req.url?.path ?? "").hasSuffix("/auth/firebase") {
+                return (200, Data(#"{"ok":true,"token":"sess_fb_123","user":{"username":"Alex"}}"#.utf8))
+            }
+            return (200, Data("{}".utf8))
+        }
+
+        let store = InMemorySessionStore()
+        let model = AppModel(keychain: store, api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "unused"))
+
+        await model.signInWithFirebase(idToken: "fake-id-token")
+
+        XCTAssertEqual(store.savedToken, "sess_fb_123")
+        XCTAssertEqual(model.session?.token, "sess_fb_123")
+        XCTAssertEqual(model.session?.username, "Alex")
+        XCTAssertNil(model.errorMessage)
+
+        // The exchanged ID token was sent in the request body.
+        let body = StubURLProtocol.requestBodies.first { $0.key.hasSuffix("/auth/firebase") }?.value
+        let decoded = body.flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+        XCTAssertEqual(decoded?["idToken"], "fake-id-token")
+    }
+
+    func testSignInWithFirebaseEmailExchangesIdTokenFromSDK() async {
+        StubURLProtocol.responder = { req in
+            if (req.url?.path ?? "").hasSuffix("/auth/firebase") {
+                return (200, Data(#"{"ok":true,"token":"sess_email","user":{"username":"you@example.com"}}"#.utf8))
+            }
+            return (200, Data("{}".utf8))
+        }
+
+        let store = InMemorySessionStore()
+        let model = AppModel(keychain: store, api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "sdk-id-token"))
+
+        await model.signInWithFirebaseEmail(email: "you@example.com", password: "pw123456")
+
+        XCTAssertEqual(store.savedToken, "sess_email")
+        XCTAssertEqual(model.session?.username, "you@example.com")
+
+        let body = StubURLProtocol.requestBodies.first { $0.key.hasSuffix("/auth/firebase") }?.value
+        let decoded = body.flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+        XCTAssertEqual(decoded?["idToken"], "sdk-id-token")
+    }
+
+    func testFirebaseSignInFailureSurfacesErrorAndKeepsSessionNil() async {
+        StubURLProtocol.responder = { _ in
+            (401, Data(#"{"error":"unauthorized"}"#.utf8))
+        }
+        let store = InMemorySessionStore()
+        let model = AppModel(keychain: store, api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+
+        await model.signInWithFirebase(idToken: "bad")
+
+        XCTAssertNil(model.session)
+        XCTAssertNil(store.savedToken)
+        XCTAssertNotNil(model.errorMessage)
+    }
+}
+
+// MARK: - Build request body construction
+
+@MainActor
+final class BuildRequestTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        StubURLProtocol.reset()
+    }
+
+    func testBuildSendsNullPlanAndTrimmedInstructions() async {
+        StubURLProtocol.responder = { req in
+            if (req.url?.path ?? "").hasSuffix("/build") {
+                return (200, Data(#"{"id":"r1","status":"ready","files":[],"summary":"ok"}"#.utf8))
+            }
+            return (200, Data("{}".utf8))
+        }
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+        model.session = Session(token: "tok", username: "u")
+        model.selectedProject = "proj1"
+
+        await model.build(planId: "", instructions: "   ship it   ")
+
+        let entry = StubURLProtocol.requestBodies.first { $0.key.hasSuffix("/projects/proj1/build") }
+        XCTAssertNotNil(entry, "expected a POST to /projects/proj1/build")
+        let obj = entry.flatMap { try? JSONSerialization.jsonObject(with: $0.value) as? [String: Any] }
+        XCTAssertNotNil(obj)
+        // Empty planId becomes JSON null; instructions are trimmed; lang propagated.
+        XCTAssertTrue(obj?["planId"] is NSNull)
+        XCTAssertEqual(obj?["instructions"] as? String, "ship it")
+        XCTAssertEqual(obj?["lang"] as? String, "en")
+    }
+}
+
+// MARK: - Test doubles (ios-only seams)
+
+private func stubAPI() -> APIClient {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [StubURLProtocol.self]
+    let session = URLSession(configuration: config)
+    return APIClient(baseURL: URL(string: "https://stub.test/api")!, session: session)
+}
+
+final class InMemorySessionStore: SessionStoring {
+    var savedToken: String?
+    var storedSession: Session?
+
+    func loadSession(username: String) -> Session? { storedSession }
+    func save(token: String) throws { savedToken = token }
+    func clear() { savedToken = nil; storedSession = nil }
+}
+
+struct StubFirebaseSignIn: FirebaseSignIn {
+    let token: String
+    func idToken(email: String, password: String) async throws -> String { token }
+}
+
+/// Hermetic URLProtocol that answers requests from a closure and records bodies
+/// (read from `httpBodyStream`, since URLSession moves JSON bodies there).
+final class StubURLProtocol: URLProtocol {
+    static var responder: ((URLRequest) -> (Int, Data))?
+    static var requestBodies: [String: Data] = [:]
+
+    static func reset() {
+        responder = nil
+        requestBodies = [:]
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        if let path = request.url?.path, let body = Self.readBody(request) {
+            Self.requestBodies[path] = body
+        }
+        let (status, data) = Self.responder?(request) ?? (200, Data("{}".utf8))
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func readBody(_ request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufferSize = 4096
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: bufferSize)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
     }
 }

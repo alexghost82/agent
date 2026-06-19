@@ -3,9 +3,15 @@ import { decryptSecret, EncryptedSecret } from "./crypto";
 import { log } from "./log";
 import { openaiEmbedding, openaiEmbeddingBatch, openaiLlm, openaiTest } from "./providers/openai";
 import { geminiEmbedding, geminiEmbeddingBatch, geminiLlm, geminiTest } from "./providers/gemini";
+import { anthropicLlm, anthropicTest } from "./providers/anthropic";
+import { azureEmbedding, azureEmbeddingBatch, azureLlm, azureTest } from "./providers/azure";
 import { type ReplyLang, normalizeLang, languageDirective } from "./lang";
 
-export type AiProvider = "openai" | "gemini";
+export type AiProvider = "openai" | "gemini" | "anthropic" | "azure-openai";
+
+// Providers that can produce embeddings natively. Anthropic cannot, so embedding
+// calls fall back to an embedding-capable provider (CONTRACT v3.7).
+const EMBEDDING_CAPABLE: ReadonlySet<AiProvider> = new Set<AiProvider>(["openai", "gemini", "azure-openai"]);
 
 interface Resolved {
   provider: AiProvider;
@@ -24,7 +30,16 @@ export interface AnswerContextItem {
 }
 
 function envKeyFor(provider: AiProvider): string | undefined {
-  return provider === "openai" ? process.env.OPENAI_API_KEY : process.env.GEMINI_API_KEY;
+  switch (provider) {
+    case "openai": return process.env.OPENAI_API_KEY;
+    case "gemini": return process.env.GEMINI_API_KEY;
+    case "anthropic": return process.env.ANTHROPIC_API_KEY;
+    case "azure-openai": return process.env.AZURE_OPENAI_API_KEY;
+  }
+}
+
+function normalizeProvider(value: unknown): AiProvider {
+  return value === "gemini" || value === "anthropic" || value === "azure-openai" ? value : "openai";
 }
 
 // Resolves which provider to use and the API key to use with it.
@@ -39,7 +54,7 @@ async function resolve(userId?: string, overrideProvider?: AiProvider): Promise<
   if (userId) {
     const data = (await db.collection("users").doc(userId).get()).data() || {};
     if (!overrideProvider) {
-      provider = data.aiProvider === "gemini" ? "gemini" : "openai";
+      provider = normalizeProvider(data.aiProvider);
     }
     const enc = data.apiKeys?.[provider] as EncryptedSecret | undefined;
     if (enc?.ciphertext) {
@@ -61,19 +76,42 @@ async function resolve(userId?: string, overrideProvider?: AiProvider): Promise<
   return { provider, apiKey, source: userKey ? "user" : "server" };
 }
 
+// Resolves a key for an embedding-capable provider. If the active provider
+// cannot embed (Anthropic), falls back to an env-configured embedder so memory
+// keeps working (CONTRACT v3.7).
+async function resolveEmbedding(userId?: string): Promise<Resolved> {
+  const r = await resolve(userId);
+  if (EMBEDDING_CAPABLE.has(r.provider)) return r;
+  const fallback: AiProvider[] = ["openai", "gemini", "azure-openai"];
+  for (const p of fallback) {
+    const key = envKeyFor(p);
+    if (key) return { provider: p, apiKey: key, source: "server" };
+  }
+  throw new Error("no_api_key");
+}
+
+function dispatchEmbedding(provider: AiProvider, apiKey: string, input: string): Promise<number[]> {
+  if (provider === "gemini") return geminiEmbedding(apiKey, input);
+  if (provider === "azure-openai") return azureEmbedding(apiKey, input);
+  return openaiEmbedding(apiKey, input);
+}
+function dispatchEmbeddingBatch(provider: AiProvider, apiKey: string, inputs: string[]): Promise<number[][]> {
+  if (provider === "gemini") return geminiEmbeddingBatch(apiKey, inputs);
+  if (provider === "azure-openai") return azureEmbeddingBatch(apiKey, inputs);
+  return openaiEmbeddingBatch(apiKey, inputs);
+}
+
 export async function embedding(input: string, userId: string): Promise<number[]> {
-  const { provider, apiKey } = await resolve(userId);
-  return provider === "gemini" ? geminiEmbedding(apiKey, input) : openaiEmbedding(apiKey, input);
+  const { provider, apiKey } = await resolveEmbedding(userId);
+  return dispatchEmbedding(provider, apiKey, input);
 }
 
 // Batch embeddings: a single provider call for many inputs. Resolves the key
 // once and returns vectors in the same order as the inputs.
 export async function embeddingBatch(inputs: string[], userId: string): Promise<number[][]> {
   if (!inputs.length) return [];
-  const { provider, apiKey } = await resolve(userId);
-  return provider === "gemini"
-    ? geminiEmbeddingBatch(apiKey, inputs)
-    : openaiEmbeddingBatch(apiKey, inputs);
+  const { provider, apiKey } = await resolveEmbedding(userId);
+  return dispatchEmbeddingBatch(provider, apiKey, inputs);
 }
 
 export async function llm(
@@ -83,9 +121,10 @@ export async function llm(
   userId?: string
 ): Promise<string> {
   const { provider, apiKey } = await resolve(userId);
-  return provider === "gemini"
-    ? geminiLlm(apiKey, system, user, temperature)
-    : openaiLlm(apiKey, system, user, temperature);
+  if (provider === "gemini") return geminiLlm(apiKey, system, user, temperature);
+  if (provider === "anthropic") return anthropicLlm(apiKey, system, user, temperature);
+  if (provider === "azure-openai") return azureLlm(apiKey, system, user, temperature);
+  return openaiLlm(apiKey, system, user, temperature);
 }
 
 // `lang` controls the answer language and defaults to Russian when omitted, so
@@ -120,11 +159,10 @@ export async function probeProvider(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const { apiKey } = await resolve(userId, provider);
-    if (provider === "gemini") {
-      await geminiTest(apiKey);
-    } else {
-      await openaiTest(apiKey);
-    }
+    if (provider === "gemini") await geminiTest(apiKey);
+    else if (provider === "anthropic") await anthropicTest(apiKey);
+    else if (provider === "azure-openai") await azureTest(apiKey);
+    else await openaiTest(apiKey);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "probe_failed" };

@@ -2,11 +2,15 @@ import { Router, Response } from "express";
 import { db } from "../firebase";
 import { serverTime, logEvent } from "../util";
 import { rateLimit } from "../ratelimit";
+import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
 import { listScoped } from "../listing";
 import { sendError, notFound } from "../errors";
 import { BuildSchema } from "../schemas";
 import { runBuild } from "../build";
+import { verifyBuild } from "../sandbox";
+import { recordOutcome } from "../learn";
+import { recordUsage } from "../usage";
 
 export const buildRouter = Router();
 
@@ -54,6 +58,7 @@ buildRouter.get("/builds/:id", async (req: AuthedRequest, res: Response) => {
 buildRouter.post(
   "/projects/:id/build",
   rateLimit("build", 6, 60_000),
+  distributedRateLimit("build", 40, 3_600_000),
   async (req: AuthedRequest, res: Response) => {
     try {
       const { planId, instructions, lang } = BuildSchema.parse(req.body);
@@ -130,18 +135,33 @@ buildRouter.post(
           await batch.commit();
         }
 
+        // Materialize + verify the generated files in an ephemeral sandbox
+        // (CONTRACT v3.1). Static, safe checks by default; never executes
+        // untrusted code or writes to any external git remote.
+        const verification = await verifyBuild(runRef.id, result.files);
+
         await runRef.update({
           status: "ready",
           fileCount: result.files.length,
           summary: result.summary,
+          verification,
           updatedAt: serverTime()
         });
+        // Self-learning (CONTRACT v3.4): feed the build outcome back into memory.
+        await recordOutcome({
+          userId: req.userId!,
+          projectId,
+          kind: "build_outcome",
+          title: `Build: ${project.name}`,
+          content: `${result.summary}\n\nFiles:\n${result.files.map((f) => `- ${f.path}`).join("\n")}`
+        });
+        await recordUsage(req.userId!, "build");
         await logEvent(req.userId!, "build_completed", project.name, {
           projectId,
           buildRunId: runRef.id,
           files: result.files.length
         });
-        res.json({ id: runRef.id, status: "ready", files: result.files, summary: result.summary, fileCount: result.files.length });
+        res.json({ id: runRef.id, status: "ready", files: result.files, summary: result.summary, fileCount: result.files.length, verification });
       } catch (genErr) {
         // Mark the run as errored with a stable-ish code, then surface via the
         // shared error envelope (§1).

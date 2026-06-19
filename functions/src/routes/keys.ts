@@ -19,12 +19,16 @@ interface KeyStatus {
 
 interface KeysStatus {
   provider: AiProvider;
-  keys: { openai: KeyStatus; gemini: KeyStatus };
+  keys: { openai: KeyStatus; gemini: KeyStatus; anthropic: KeyStatus; azure: KeyStatus };
+}
+
+function normalizeProvider(value: unknown): AiProvider {
+  return value === "gemini" || value === "anthropic" || value === "azure-openai" ? value : "openai";
 }
 
 // Builds the client-safe status object. Raw keys are never included.
 function statusFromUser(data: FirebaseFirestore.DocumentData | undefined): KeysStatus {
-  const provider: AiProvider = data?.aiProvider === "gemini" ? "gemini" : "openai";
+  const provider = normalizeProvider(data?.aiProvider);
   const apiKeys = data?.apiKeys || {};
   const toStatus = (entry: { ciphertext?: string; last4?: string; updatedAt?: unknown } | undefined): KeyStatus =>
     entry?.ciphertext
@@ -32,7 +36,12 @@ function statusFromUser(data: FirebaseFirestore.DocumentData | undefined): KeysS
       : { configured: false };
   return {
     provider,
-    keys: { openai: toStatus(apiKeys.openai), gemini: toStatus(apiKeys.gemini) }
+    keys: {
+      openai: toStatus(apiKeys.openai),
+      gemini: toStatus(apiKeys.gemini),
+      anthropic: toStatus(apiKeys.anthropic),
+      azure: toStatus(apiKeys["azure-openai"] || apiKeys.azure)
+    }
   };
 }
 
@@ -63,12 +72,21 @@ keysRouter.put("/me/api-keys", async (req: AuthedRequest, res: Response) => {
     if (body.gemini === null) update["apiKeys.gemini"] = FieldValue.delete();
     else if (typeof body.gemini === "string") update["apiKeys.gemini"] = encEntry(body.gemini);
 
+    if (body.anthropic === null) update["apiKeys.anthropic"] = FieldValue.delete();
+    else if (typeof body.anthropic === "string") update["apiKeys.anthropic"] = encEntry(body.anthropic);
+
+    // Azure key is stored under the "azure-openai" provider id so resolve() finds it.
+    if (body.azure === null) update["apiKeys.azure-openai"] = FieldValue.delete();
+    else if (typeof body.azure === "string") update["apiKeys.azure-openai"] = encEntry(body.azure);
+
     if (Object.keys(update).length) {
       await ref.update(update);
       await logEvent(req.userId!, "api_keys_updated", "API keys updated", {
         provider: body.provider ?? null,
         openai: body.openai === null ? "deleted" : typeof body.openai === "string" ? "set" : "unchanged",
-        gemini: body.gemini === null ? "deleted" : typeof body.gemini === "string" ? "set" : "unchanged"
+        gemini: body.gemini === null ? "deleted" : typeof body.gemini === "string" ? "set" : "unchanged",
+        anthropic: body.anthropic === null ? "deleted" : typeof body.anthropic === "string" ? "set" : "unchanged",
+        azure: body.azure === null ? "deleted" : typeof body.azure === "string" ? "set" : "unchanged"
       });
     }
 

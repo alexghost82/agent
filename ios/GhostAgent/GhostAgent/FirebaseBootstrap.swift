@@ -25,6 +25,40 @@ enum FirebaseStatus: Equatable {
     }
 }
 
+/// Errors surfaced by the Firebase sign-in path before the GHOST session
+/// exchange (`POST /auth/firebase`) is reached.
+enum FirebaseSignInError: LocalizedError, Equatable {
+    case sdkUnavailable
+    case missingToken
+
+    var errorDescription: String? {
+        switch self {
+        case .sdkUnavailable:
+            return "Firebase Auth is unavailable in this build."
+        case .missingToken:
+            return "Could not obtain a Firebase ID token."
+        }
+    }
+}
+
+/// Seam over Firebase Auth so the sign-in flow can be stubbed in tests without
+/// a live Firebase project. Live implementation signs in with email/password
+/// and returns the user's ID token, which is then exchanged for a GHOST session.
+protocol FirebaseSignIn {
+    func idToken(email: String, password: String) async throws -> String
+}
+
+struct LiveFirebaseSignIn: FirebaseSignIn {
+    func idToken(email: String, password: String) async throws -> String {
+        #if canImport(FirebaseAuth)
+        let result = try await Auth.auth().signIn(withEmail: email, password: password)
+        return try await result.user.getIDToken()
+        #else
+        throw FirebaseSignInError.sdkUnavailable
+        #endif
+    }
+}
+
 enum FirebaseBootstrap {
     @MainActor
     static func configure() -> FirebaseStatus {

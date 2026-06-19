@@ -179,6 +179,8 @@ private struct MainShellView: View {
         case .ask: AskParityPanel()
         case .design: DesignParityPanel()
         case .plan: PlanParityPanel()
+        case .build: BuildParityPanel()
+        case .memory: MemoryParityPanel()
         case .settings: SettingsParityPanel()
         }
     }

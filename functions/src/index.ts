@@ -8,14 +8,17 @@ import "./firebase";
 import { requireAuth, ensureSeedUsersOnce } from "./auth";
 import type { AuthedRequest } from "./auth";
 import { requestId, log } from "./log";
+import { securityHeaders } from "./security";
 import { sendError, notFound } from "./errors";
 import { publicRouter } from "./routes/public";
 import { sessionRouter } from "./routes/session";
+import { usersRouter } from "./routes/users";
 import { topicsRouter } from "./routes/topics";
 import { sourcesRouter } from "./routes/sources";
 import { skillsRouter } from "./routes/skills";
 import { projectsRouter } from "./routes/projects";
 import { buildRouter } from "./routes/build";
+import { memoryRouter } from "./routes/memory";
 import { askRouter } from "./routes/ask";
 import { designRouter } from "./routes/design";
 import { plansRouter } from "./routes/plans";
@@ -58,6 +61,7 @@ if (allowedOrigins.length) {
 const app = express();
 
 app.use(requestId);
+app.use(securityHeaders);
 app.use(cors({ origin: corsOrigin, credentials: false }));
 app.use(express.json({ limit: "4mb" }));
 
@@ -77,11 +81,13 @@ app.use(publicRouter);
 // Everything below requires a valid Bearer session token.
 app.use(requireAuth);
 app.use(sessionRouter);
+app.use(usersRouter);
 app.use(topicsRouter);
 app.use(sourcesRouter);
 app.use(skillsRouter);
 app.use(projectsRouter);
 app.use(buildRouter);
+app.use(memoryRouter);
 app.use(askRouter);
 app.use(designRouter);
 app.use(plansRouter);
@@ -107,3 +113,7 @@ export const api = onRequest(
   { memory: "1GiB", timeoutSeconds: 120, concurrency: 20 },
   app
 );
+
+// Async repo ingestion worker (ADR-0002). Cloud Tasks invokes this out-of-band;
+// `connect-github` only enqueues. Defined in its own module to keep index lean.
+export { ingestWorker } from "./tasks";

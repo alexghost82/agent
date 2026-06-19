@@ -24,14 +24,17 @@ import { FieldValue } from "firebase-admin/firestore";
 import { db } from "../../src/firebase";
 import { requireAuth, hashPassword, makeSalt, type AuthedRequest } from "../../src/auth";
 import { requestId } from "../../src/log";
+import { securityHeaders } from "../../src/security";
 import { sendError, notFound } from "../../src/errors";
 import { publicRouter } from "../../src/routes/public";
 import { sessionRouter } from "../../src/routes/session";
+import { usersRouter } from "../../src/routes/users";
 import { topicsRouter } from "../../src/routes/topics";
 import { sourcesRouter } from "../../src/routes/sources";
 import { skillsRouter } from "../../src/routes/skills";
 import { projectsRouter } from "../../src/routes/projects";
 import { buildRouter } from "../../src/routes/build";
+import { memoryRouter } from "../../src/routes/memory";
 import { askRouter } from "../../src/routes/ask";
 import { designRouter } from "../../src/routes/design";
 import { plansRouter } from "../../src/routes/plans";
@@ -66,6 +69,7 @@ export function buildApp(): express.Express {
   else corsOrigin = true;
 
   app.use(requestId);
+  app.use(securityHeaders);
   app.use(cors({ origin: corsOrigin, credentials: false }));
   app.use(express.json({ limit: "4mb" }));
 
@@ -79,11 +83,13 @@ export function buildApp(): express.Express {
   app.use(publicRouter);
   app.use(requireAuth);
   app.use(sessionRouter);
+  app.use(usersRouter);
   app.use(topicsRouter);
   app.use(sourcesRouter);
   app.use(skillsRouter);
   app.use(projectsRouter);
   app.use(buildRouter);
+  app.use(memoryRouter);
   app.use(askRouter);
   app.use(designRouter);
   app.use(plansRouter);

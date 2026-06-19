@@ -1,7 +1,15 @@
 import Foundation
 import Security
 
-struct KeychainStore {
+/// Seam over the secure session store so `AppModel` can be exercised in tests
+/// with an in-memory stub instead of touching the real Keychain.
+protocol SessionStoring {
+    func loadSession(username: String) -> Session?
+    func save(token: String) throws
+    func clear()
+}
+
+struct KeychainStore: SessionStoring {
     private let service = "com.ghostagnt.ghost.session"
     private let account = "backend-bearer"
 
