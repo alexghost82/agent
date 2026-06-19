@@ -6,6 +6,7 @@ import { Icon } from "../../icons";
 import { downloadMd } from "../../api";
 import { downloadZip } from "../../zip";
 import { Markdown } from "../../markdown";
+import { ResultSkeleton } from "../Skeleton";
 
 type BuildFile = { path: string; content: string };
 
@@ -19,6 +20,32 @@ function StatusBadge({ status, t }: { status: string; t: any }) {
   const cls = STATUS_CLASS[status] || "todo";
   const label = (t.buildStatus && t.buildStatus[status]) || status;
   return <span className={`status status-${cls}`}>{label}</span>;
+}
+
+const VERIFY_CLASS: Record<string, string> = {
+  passed: "ready",
+  failed: "error",
+  error: "error",
+  skipped: "todo"
+};
+
+// Shows the build verification result (passed/failed/skipped/error) plus a
+// draft/verified mark. Additive — renders nothing for older runs without a
+// verification report.
+function VerificationBadge({ verification, t }: { verification: any; t: any }) {
+  if (!verification || !verification.status) return null;
+  const status = String(verification.status);
+  const cls = VERIFY_CLASS[status] || "todo";
+  const statusLabel = (t.verifyStatus && t.verifyStatus[status]) || status;
+  const mark = status === "passed" ? t.buildVerified : t.buildDraft;
+  return (
+    <span className="row-actions">
+      <span className={`status status-${cls}`}>
+        {t.verifyTitle}: {statusLabel}
+      </span>
+      <span className="tag">{mark}</span>
+    </span>
+  );
 }
 
 function FileList({ files, t }: { files: BuildFile[]; t: any }) {
@@ -98,9 +125,7 @@ export function BuildPanel({ g }: { g: GhostData }) {
       </div>
 
       {loading.build ? (
-        <div className="result-box loading">
-          <span className="spinner" /> {t.working}
-        </div>
+        <ResultSkeleton label={t.working} />
       ) : buildOutput?.error ? (
         <div className="result-box err">
           <strong>{t.errorWord}:</strong>{" "}
@@ -125,11 +150,14 @@ export function BuildPanel({ g }: { g: GhostData }) {
             <h3>
               {t.generatedFiles} ({buildFiles.length})
             </h3>
-            {buildFiles.length ? (
-              <button className="ghost sm" onClick={() => downloadZip(projectName, buildFiles)}>
-                <Icon name="archive" /> {t.downloadZipBtn}
-              </button>
-            ) : null}
+            <span className="row-actions">
+              <VerificationBadge verification={buildOutput?.verification} t={t} />
+              {buildFiles.length ? (
+                <button className="ghost sm" onClick={() => downloadZip(projectName, buildFiles)}>
+                  <Icon name="archive" /> {t.downloadZipBtn}
+                </button>
+              ) : null}
+            </span>
           </div>
           {buildFiles.length ? <FileList files={buildFiles} t={t} /> : null}
         </>
@@ -156,6 +184,7 @@ export function BuildPanel({ g }: { g: GhostData }) {
                   <b>{String(b.summary || id)}</b>
                   <span className="row-actions">
                     <StatusBadge status={String(b.status || "")} t={t} />
+                    <VerificationBadge verification={(b as any).verification} t={t} />
                     <span className="tag">
                       {String(b.fileCount ?? 0)} {t.buildFilesCount}
                     </span>
@@ -173,9 +202,7 @@ export function BuildPanel({ g }: { g: GhostData }) {
                 </div>
 
                 {isOpenLoading ? (
-                  <div className="result-box loading">
-                    <span className="spinner" /> {t.working}
-                  </div>
+                  <ResultSkeleton label={t.working} />
                 ) : showOpened ? (
                   openOutput?.error ? (
                     <div className="result-box err">
@@ -193,16 +220,19 @@ export function BuildPanel({ g }: { g: GhostData }) {
                         <h3>
                           {t.generatedFiles} ({openFiles.length})
                         </h3>
-                        {openFiles.length ? (
-                          <button
-                            className="ghost sm"
-                            onClick={() =>
-                              downloadZip(String(openRun.projectName || projectName), openFiles)
-                            }
-                          >
-                            <Icon name="archive" /> {t.downloadZipBtn}
-                          </button>
-                        ) : null}
+                        <span className="row-actions">
+                          <VerificationBadge verification={openRun?.verification} t={t} />
+                          {openFiles.length ? (
+                            <button
+                              className="ghost sm"
+                              onClick={() =>
+                                downloadZip(String(openRun.projectName || projectName), openFiles)
+                              }
+                            >
+                              <Icon name="archive" /> {t.downloadZipBtn}
+                            </button>
+                          ) : null}
+                        </span>
                       </div>
                       {openFiles.length ? <FileList files={openFiles} t={t} /> : null}
                     </>

@@ -115,3 +115,72 @@ const index: VectorIndex = makeIndex();
 export async function searchMemory(query: string, scope: SearchScope, limit = 8): Promise<ScoredChunk[]> {
   return index.search(query, scope, limit);
 }
+
+export interface GatherContextOpts {
+  // Per-subquery retrieval limit passed to `searchMemory`.
+  perQuery?: number;
+  // Hard cap on the number of merged chunks returned.
+  maxChunks?: number;
+  // Total character budget across the returned chunks' `content`. Once the
+  // budget is exhausted the remaining (lowest-priority) chunks are dropped.
+  charBudget?: number;
+}
+
+// Pure merge/rank/budget step for a set of already-retrieved candidate chunks
+// (Epic 2.1). Kept side-effect free so it is unit-testable without Firestore:
+//   1. dedup by `id` (keeping the highest score seen for an id),
+//   2. promote `chunkType==="summary"` chunks to the front (resource summaries
+//      are the most valuable "understanding" we have), each group sorted by
+//      score desc,
+//   3. cap to `maxChunks` and to a cumulative `charBudget`, dropping the tail.
+export function mergeContext(
+  results: ScoredChunk[],
+  opts?: { maxChunks?: number; charBudget?: number }
+): ScoredChunk[] {
+  const maxChunks = opts?.maxChunks ?? 40;
+  const charBudget = opts?.charBudget ?? 16000;
+
+  const byId = new Map<string, ScoredChunk>();
+  for (const c of results) {
+    if (!c || !c.id) continue;
+    const prev = byId.get(c.id);
+    if (!prev || c.score > prev.score) byId.set(c.id, c);
+  }
+
+  const merged = [...byId.values()];
+  const summaries = merged.filter((c) => c.chunkType === "summary").sort((a, b) => b.score - a.score);
+  const rest = merged.filter((c) => c.chunkType !== "summary").sort((a, b) => b.score - a.score);
+  const ordered = [...summaries, ...rest];
+
+  const out: ScoredChunk[] = [];
+  let used = 0;
+  for (const c of ordered) {
+    if (out.length >= maxChunks) break;
+    const len = (c.content || "").length;
+    // Always allow at least one chunk through even if it alone exceeds the
+    // budget, so a single large summary is never silently dropped.
+    if (out.length > 0 && used + len > charBudget) continue;
+    out.push(c);
+    used += len;
+  }
+  return out;
+}
+
+// Retrieve and merge context for one or more subqueries (Epic 2.1). Runs each
+// subquery through `searchMemory` (in parallel), then merges/ranks/budgets the
+// union via `mergeContext`. Summary chunks float to the top; output is bounded
+// by `maxChunks` and `charBudget`.
+export async function gatherContext(
+  queries: string[] | string,
+  scope: SearchScope,
+  opts?: GatherContextOpts
+): Promise<ScoredChunk[]> {
+  const list = (Array.isArray(queries) ? queries : [queries])
+    .map((q) => (q || "").trim())
+    .filter(Boolean);
+  if (!list.length) return [];
+
+  const perQuery = opts?.perQuery ?? 8;
+  const batches = await Promise.all(list.map((q) => searchMemory(q, scope, perQuery)));
+  return mergeContext(batches.flat(), { maxChunks: opts?.maxChunks, charBudget: opts?.charBudget });
+}

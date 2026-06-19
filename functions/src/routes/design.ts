@@ -2,7 +2,8 @@ import { Router, Response } from "express";
 import { db } from "../firebase";
 import { serverTime, logEvent } from "../util";
 import { generateAnswer } from "../ai";
-import { searchMemory } from "../memory";
+import { gatherContext } from "../memory";
+import { deriveSubqueries } from "../pure";
 import { rateLimit } from "../ratelimit";
 import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
@@ -68,17 +69,14 @@ designRouter.post("/design", rateLimit("design", 20, 60_000), distributedRateLim
     // projects), fall back to the user's whole learned memory so designs still
     // build on the topics/sources the agent studied. Additive: this only adds
     // context when the scoped search returned nothing.
-    let context = await searchMemory(
-      `${project.name} ${project.description} ${section || ""}`,
-      { userId: req.userId!, projectId },
-      14
-    );
+    const subqueries = deriveSubqueries({
+      name: project.name,
+      description: project.description,
+      section
+    });
+    let context = await gatherContext(subqueries, { userId: req.userId!, projectId }, { maxChunks: 40, charBudget: 16000 });
     if (!context.length) {
-      context = await searchMemory(
-        `${project.name} ${project.description} ${section || ""}`,
-        { userId: req.userId! },
-        14
-      );
+      context = await gatherContext(subqueries, { userId: req.userId! }, { maxChunks: 40, charBudget: 16000 });
     }
     const prompt = `ПРОЕКТ: ${project.name}
 ОПИСАНИЕ: ${project.description}

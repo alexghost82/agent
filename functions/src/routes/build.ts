@@ -7,8 +7,7 @@ import { AuthedRequest } from "../auth";
 import { listScoped } from "../listing";
 import { sendError, notFound } from "../errors";
 import { BuildSchema } from "../schemas";
-import { runBuild } from "../build";
-import { verifyBuild } from "../sandbox";
+import { runVerifiedBuild } from "../build";
 import { recordOutcome } from "../learn";
 import { recordUsage } from "../usage";
 
@@ -100,7 +99,11 @@ buildRouter.post(
       });
 
       try {
-        const result = await runBuild({
+        // Generate → verify → (optional) ONE auto-fix pass, keeping the better
+        // attempt (Epic 4.2). Static checks by default; the real toolchain runs
+        // only on an isolated runner with BUILD_EXEC_ENABLED. Never executes
+        // untrusted code on the shared api process or writes to any git remote.
+        const result = await runVerifiedBuild(runRef.id, {
           userId: req.userId!,
           projectId,
           project: {
@@ -114,8 +117,9 @@ buildRouter.post(
           instructions,
           lang
         });
+        const verification = result.verification;
 
-        // Persist each generated file as an owned artifact.
+        // Persist each FINAL generated file as an owned artifact.
         for (let i = 0; i < result.files.length; i += ARTIFACT_WRITE_BATCH) {
           const slice = result.files.slice(i, i + ARTIFACT_WRITE_BATCH);
           const batch = db.batch();
@@ -135,16 +139,12 @@ buildRouter.post(
           await batch.commit();
         }
 
-        // Materialize + verify the generated files in an ephemeral sandbox
-        // (CONTRACT v3.1). Static, safe checks by default; never executes
-        // untrusted code or writes to any external git remote.
-        const verification = await verifyBuild(runRef.id, result.files);
-
         await runRef.update({
           status: "ready",
           fileCount: result.files.length,
           summary: result.summary,
           verification,
+          autofixed: result.autofixed,
           updatedAt: serverTime()
         });
         // Self-learning (CONTRACT v3.4): feed the build outcome back into memory.
@@ -161,7 +161,7 @@ buildRouter.post(
           buildRunId: runRef.id,
           files: result.files.length
         });
-        res.json({ id: runRef.id, status: "ready", files: result.files, summary: result.summary, fileCount: result.files.length, verification });
+        res.json({ id: runRef.id, status: "ready", files: result.files, summary: result.summary, fileCount: result.files.length, verification, autofixed: result.autofixed });
       } catch (genErr) {
         // Mark the run as errored with a stable-ish code, then surface via the
         // shared error envelope (§1).

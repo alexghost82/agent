@@ -17,6 +17,11 @@ final class AppModel {
     var plans: [JSONValue] = []
     var builds: [JSONValue] = []
     var memoryChunks: [JSONValue] = []
+    var agentResult: AgentRunResult?
+    var agentStatus: AgentRun?
+    var agentRuns: [AgentRun] = []
+    var agentErrorCode: String?
+    var agentRequestId: String?
     var output: [String: JSONValue] = [:]
     var loading: Set<String> = []
     var selectedTopic = ""
@@ -30,6 +35,7 @@ final class AppModel {
     private let api: APIClient
     private let firebaseAuth: FirebaseSignIn
     @ObservationIgnored private var ingestPollTask: Task<Void, Never>?
+    @ObservationIgnored private var agentPollTask: Task<Void, Never>?
 
     /// Localized strings for the current language (EN/HE/RU), in parity with the web i18n.
     var t: Strings { Strings.resolve(lang) }
@@ -43,6 +49,33 @@ final class AppModel {
     /// Whether an `ingestStatus` value represents work still in flight.
     static func isInProgressIngest(_ status: String?) -> Bool {
         status == "queued" || status == "ingesting"
+    }
+
+    /// Whether an agent-run status is terminal — i.e. the orchestration has
+    /// finished (ready) or aborted (error) and polling can stop. The in-flight
+    /// statuses are learning/skilling/designing/planning/building.
+    static func isTerminalAgentStatus(_ status: String?) -> Bool {
+        status == "ready" || status == "error"
+    }
+
+    /// The API base URL the client is talking to, surfaced read-only in the
+    /// Settings diagnostics card (SPECS §D req 6).
+    var apiBaseURLString: String { api.baseURL.absoluteString }
+
+    /// Firebase project id when the SDK is configured (diagnostics card).
+    var firebaseProjectID: String? {
+        if case let .configured(projectID) = firebaseStatus { return projectID }
+        return nil
+    }
+
+    /// Localized one-line label for the current Firebase configuration status,
+    /// shown in the Settings diagnostics view (SPECS §D req 1).
+    func firebaseStatusLabel() -> String {
+        switch firebaseStatus {
+        case .configured: return t("diagFbConfigured")
+        case .missingConfig: return t("diagFbMissingConfig")
+        case .sdkUnavailable: return t("diagFbUnavailable")
+        }
     }
 
     /// Localized label for an async ingest status (queued → ingesting → ready).
@@ -123,6 +156,7 @@ final class AppModel {
 
     private func clearLocalSession() {
         stopIngestPolling()
+        stopAgentPolling()
         keychain.clear()
         session = nil
         active = .overview
@@ -134,6 +168,11 @@ final class AppModel {
         plans = []
         builds = []
         memoryChunks = []
+        agentResult = nil
+        agentStatus = nil
+        agentRuns = []
+        agentErrorCode = nil
+        agentRequestId = nil
         output = [:]
         loading = []
         selectedTopic = ""
@@ -192,6 +231,8 @@ final class AppModel {
                 await loadPlans(projectId: selectedProject)
                 await loadBuilds(projectId: selectedProject)
             }
+        case .autorun:
+            await loadAgentRuns()
         case .memory:
             await loadTopics()
             await loadMemory()
@@ -635,6 +676,104 @@ final class AppModel {
         }
         await loadMemory()
         await loadDashboard()
+    }
+
+    // MARK: - Autonomous agent (Autorun, Epic 3)
+
+    /// List the caller's prior autopilot runs via `GET /agent/runs` (newest
+    /// first, owner-scoped on the server).
+    func loadAgentRuns() async {
+        do {
+            agentRuns = try await authed { token in try await api.agentRuns(token: token) }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Run the full autopilot cycle via `POST /agent/run`, mirroring the web
+    /// `runAgent`: links + task → learn → skills → design → plan → verified
+    /// build, all in one call. The synchronous response carries the final files,
+    /// summary and steps; the run list is refreshed so the new run shows up.
+    /// Server error envelopes are surfaced via `agentErrorCode`/`agentRequestId`
+    /// (never logging secrets).
+    func runAgent(urls: [String], task: String, deep: Bool) async {
+        let cleanUrls = urls
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let trimmedTask = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanUrls.isEmpty, trimmedTask.count >= 3 else { return }
+
+        loading.insert("agent")
+        agentResult = nil
+        agentStatus = nil
+        agentErrorCode = nil
+        agentRequestId = nil
+        defer { loading.remove("agent") }
+
+        do {
+            let result = try await authed { token in
+                try await api.agentRun(urls: cleanUrls, task: trimmedTask, deep: deep, lang: lang.rawValue, token: token)
+            }
+            agentResult = result
+            errorMessage = nil
+            await loadAgentRuns()
+            await loadDashboard()
+        } catch let error as APIClientError {
+            if case let .server(code, requestId, _) = error {
+                agentErrorCode = code
+                agentRequestId = requestId
+                errorMessage = code
+            } else {
+                agentErrorCode = "internal"
+                errorMessage = error.localizedDescription
+            }
+        } catch {
+            agentErrorCode = "internal"
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Open a single run's live status via `GET /agent/runs/:id` and, when it is
+    /// still in progress, poll it until it reaches a terminal status — reusing
+    /// the same 2.5s cadence as the ingest poller.
+    func openAgentRun(id: String) async {
+        await refreshAgentRun(id: id)
+        if !Self.isTerminalAgentStatus(agentStatus?.status) {
+            startAgentPolling(id: id)
+        }
+    }
+
+    private func refreshAgentRun(id: String) async {
+        do {
+            agentStatus = try await authed { token in try await api.agentRunStatus(id: id, token: token) }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Poll an in-progress run every 2.5s (mirrors `startIngestPollingIfNeeded`)
+    /// until `isTerminalAgentStatus` holds, then stop and refresh the list.
+    private func startAgentPolling(id: String) {
+        guard session != nil, !id.isEmpty else { return }
+        agentPollTask?.cancel()
+        agentPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard let self else { return }
+                if Task.isCancelled { return }
+                await self.refreshAgentRun(id: id)
+                if Self.isTerminalAgentStatus(self.agentStatus?.status) {
+                    self.stopAgentPolling()
+                    await self.loadAgentRuns()
+                    return
+                }
+            }
+        }
+    }
+
+    private func stopAgentPolling() {
+        agentPollTask?.cancel()
+        agentPollTask = nil
     }
 
     func loadKeys() async {

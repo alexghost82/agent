@@ -60,6 +60,45 @@ final class IngestStatusTests: XCTestCase {
     }
 }
 
+// MARK: - Settings diagnostics (SPECS §D req 1 & 6)
+
+@MainActor
+final class DiagnosticsTests: XCTestCase {
+    private func model() -> AppModel {
+        AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+    }
+
+    func testApiBaseURLStringReflectsConfiguredClient() {
+        // The diagnostics card surfaces the exact base URL the client talks to.
+        XCTAssertEqual(model().apiBaseURLString, "https://stub.test/api")
+    }
+
+    func testFirebaseStatusLabelIsLocalizedAndSecretFree() {
+        let model = model()
+
+        model.firebaseStatus = .sdkUnavailable
+        model.lang = .en
+        XCTAssertEqual(model.firebaseStatusLabel(), "SDK unavailable")
+        model.lang = .ru
+        XCTAssertEqual(model.firebaseStatusLabel(), "SDK недоступен")
+
+        model.firebaseStatus = .missingConfig
+        model.lang = .en
+        XCTAssertEqual(model.firebaseStatusLabel(), "Missing GoogleService-Info.plist")
+
+        model.firebaseStatus = .configured(projectID: "ghost-123")
+        model.lang = .he
+        XCTAssertEqual(model.firebaseStatusLabel(), "מוגדר")
+        XCTAssertEqual(model.firebaseProjectID, "ghost-123")
+    }
+
+    func testFirebaseProjectIDNilWhenNotConfigured() {
+        let model = model()
+        model.firebaseStatus = .sdkUnavailable
+        XCTAssertNil(model.firebaseProjectID)
+    }
+}
+
 // MARK: - Build & memory response decoding (parity with backend shapes)
 
 final class BuildMemoryDecodingTests: XCTestCase {
@@ -142,6 +181,193 @@ final class BuildMemoryDecodingTests: XCTestCase {
         // Null title falls back to sourcePath in the UI row.
         XCTAssertNil(chunks.last?.string("title"))
         XCTAssertEqual(chunks.last?.string("sourcePath"), "src/a.ts")
+    }
+}
+
+// MARK: - Autonomous agent (Autorun) decoding & polling logic
+
+@MainActor
+final class AgentDecodingTests: XCTestCase {
+    func testAgentRunResultDecodesFilesSummaryAndSteps() throws {
+        let json = #"""
+        {
+          "runId": "run_42",
+          "topicId": "t_1",
+          "projectId": "p_1",
+          "buildRunId": "b_1",
+          "summary": "Built a TS CLI.",
+          "files": [
+            {"path": "README.md", "content": "# Hi", "language": "markdown", "bytes": 4},
+            {"path": "src/index.ts", "content": "export const x = 1;"}
+          ],
+          "verification": {"status": "passed"},
+          "steps": [
+            {"name": "learning", "status": "done", "detail": "2/2 urls, 9 chunks"},
+            {"name": "building", "status": "done", "detail": "passed"}
+          ]
+        }
+        """#.data(using: .utf8)!
+
+        let result = try JSONDecoder().decode(AgentRunResult.self, from: json)
+
+        XCTAssertEqual(result.runId, "run_42")
+        XCTAssertEqual(result.topicId, "t_1")
+        XCTAssertEqual(result.projectId, "p_1")
+        XCTAssertEqual(result.buildRunId, "b_1")
+        XCTAssertEqual(result.summary, "Built a TS CLI.")
+        XCTAssertEqual(result.files.count, 2)
+        XCTAssertEqual(result.files.first?.path, "README.md")
+        XCTAssertEqual(result.files.first?.content, "# Hi")
+        XCTAssertEqual(result.files.first?.language, "markdown")
+        XCTAssertEqual(result.files.first?.bytes, 4)
+        // Optional file metadata may be absent.
+        XCTAssertNil(result.files.last?.language)
+        XCTAssertNil(result.files.last?.bytes)
+        XCTAssertEqual(result.steps.count, 2)
+        XCTAssertEqual(result.steps.first?.name, "learning")
+        XCTAssertEqual(result.steps.first?.status, "done")
+        XCTAssertEqual(result.steps.first?.detail, "2/2 urls, 9 chunks")
+        XCTAssertEqual(result.steps.last?.name, "building")
+        XCTAssertEqual(result.steps.last?.detail, "passed")
+    }
+
+    func testAgentRunStatusEnvelopeDecodes() throws {
+        // Shape of `GET /agent/runs/:id` → `{ run: {...} }`.
+        let json = #"""
+        {"run":{
+          "id": "run_7",
+          "status": "building",
+          "task": "Make an RSS summarizer",
+          "topicId": "t",
+          "projectId": "p",
+          "buildRunId": null,
+          "errorCode": null,
+          "createdAt": {"_seconds": 1718000000, "_nanoseconds": 0},
+          "steps": [
+            {"name": "learning", "status": "done"},
+            {"name": "skilling", "status": "done", "detail": "3 skills"}
+          ]
+        }}
+        """#.data(using: .utf8)!
+
+        let envelope = try JSONDecoder().decode(AgentRunEnvelope.self, from: json)
+        let run = envelope.run
+
+        XCTAssertEqual(run.id, "run_7")
+        XCTAssertEqual(run.status, "building")
+        XCTAssertEqual(run.task, "Make an RSS summarizer")
+        // A Firestore Timestamp object on an unmapped key must not break decoding.
+        XCTAssertNil(run.buildRunId)
+        XCTAssertNil(run.errorCode)
+        XCTAssertEqual(run.steps.count, 2)
+        XCTAssertEqual(run.steps.last?.detail, "3 skills")
+    }
+
+    func testAgentRunsListEnvelopeDecodes() throws {
+        let json = #"""
+        {"runs":[
+          {"id":"r1","status":"ready","task":"A","steps":[{"name":"building","status":"done"}]},
+          {"id":"r2","status":"error","task":"B","errorCode":"no_api_key","steps":[]}
+        ]}
+        """#.data(using: .utf8)!
+
+        let envelope = try JSONDecoder().decode(AgentRunsEnvelope.self, from: json)
+
+        XCTAssertEqual(envelope.runs.count, 2)
+        XCTAssertEqual(envelope.runs.first?.id, "r1")
+        XCTAssertEqual(envelope.runs.first?.status, "ready")
+        XCTAssertEqual(envelope.runs.last?.status, "error")
+        XCTAssertEqual(envelope.runs.last?.errorCode, "no_api_key")
+        XCTAssertTrue(envelope.runs.last?.steps.isEmpty ?? false)
+    }
+
+    func testTerminalStatusStopsPolling() {
+        // Only ready/error are terminal; the in-flight phases keep polling.
+        XCTAssertTrue(AppModel.isTerminalAgentStatus("ready"))
+        XCTAssertTrue(AppModel.isTerminalAgentStatus("error"))
+        XCTAssertFalse(AppModel.isTerminalAgentStatus("learning"))
+        XCTAssertFalse(AppModel.isTerminalAgentStatus("skilling"))
+        XCTAssertFalse(AppModel.isTerminalAgentStatus("designing"))
+        XCTAssertFalse(AppModel.isTerminalAgentStatus("planning"))
+        XCTAssertFalse(AppModel.isTerminalAgentStatus("building"))
+        XCTAssertFalse(AppModel.isTerminalAgentStatus(nil))
+    }
+}
+
+// MARK: - Autonomous agent request & error mapping
+
+@MainActor
+final class AgentRequestTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        StubURLProtocol.reset()
+    }
+
+    func testRunAgentSendsUrlsTaskDeepAndLang() async {
+        StubURLProtocol.responder = { req in
+            if (req.url?.path ?? "").hasSuffix("/agent/run") {
+                return (200, Data(#"{"runId":"run_1","files":[],"summary":"ok","steps":[]}"#.utf8))
+            }
+            return (200, Data(#"{"runs":[]}"#.utf8))
+        }
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+        model.session = Session(token: "tok", username: "u")
+        model.lang = .ru
+
+        await model.runAgent(urls: ["  https://a.dev/docs ", "", "https://b.dev"], task: "  build a thing  ", deep: true)
+
+        let entry = StubURLProtocol.requestBodies.first { $0.key.hasSuffix("/agent/run") }
+        XCTAssertNotNil(entry, "expected a POST to /agent/run")
+        let obj = entry.flatMap { try? JSONSerialization.jsonObject(with: $0.value) as? [String: Any] }
+        XCTAssertEqual(obj?["urls"] as? [String], ["https://a.dev/docs", "https://b.dev"])
+        XCTAssertEqual(obj?["task"] as? String, "build a thing")
+        XCTAssertEqual(obj?["deep"] as? Bool, true)
+        XCTAssertEqual(obj?["lang"] as? String, "ru")
+        XCTAssertEqual(model.agentResult?.runId, "run_1")
+        XCTAssertNil(model.agentErrorCode)
+    }
+
+    func testRunAgentMapsErrorEnvelopeToCodeAndRequestId() async {
+        StubURLProtocol.responder = { req in
+            if (req.url?.path ?? "").hasSuffix("/agent/run") {
+                return (429, Data(#"{"error":"rate_limited","requestId":"req_9"}"#.utf8))
+            }
+            return (200, Data(#"{"runs":[]}"#.utf8))
+        }
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+        model.session = Session(token: "tok", username: "u")
+
+        await model.runAgent(urls: ["https://a.dev"], task: "do the work", deep: false)
+
+        XCTAssertNil(model.agentResult)
+        XCTAssertEqual(model.agentErrorCode, "rate_limited")
+        XCTAssertEqual(model.agentRequestId, "req_9")
+    }
+
+    func testRunAgentSkipsWhenNoUrlsOrShortTask() async {
+        StubURLProtocol.responder = { _ in (200, Data("{}".utf8)) }
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+        model.session = Session(token: "tok", username: "u")
+
+        await model.runAgent(urls: [], task: "valid task", deep: false)
+        await model.runAgent(urls: ["https://a.dev"], task: "no", deep: false)
+
+        XCTAssertTrue(StubURLProtocol.requestBodies.isEmpty, "no request should be sent for invalid input")
+        XCTAssertNil(model.agentResult)
+    }
+
+    func testLoadAgentRunsDecodesList() async {
+        StubURLProtocol.responder = { _ in
+            (200, Data(#"{"runs":[{"id":"r1","status":"ready","task":"A","steps":[]}]}"#.utf8))
+        }
+        let model = AppModel(keychain: InMemorySessionStore(), api: stubAPI(), firebaseAuth: StubFirebaseSignIn(token: "x"))
+        model.session = Session(token: "tok", username: "u")
+
+        await model.loadAgentRuns()
+
+        XCTAssertEqual(model.agentRuns.count, 1)
+        XCTAssertEqual(model.agentRuns.first?.id, "r1")
+        XCTAssertEqual(model.agentRuns.first?.status, "ready")
     }
 }
 

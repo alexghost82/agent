@@ -130,6 +130,18 @@ export const BuildSchema = z.object({
   lang: replyLang
 });
 
+// Autonomous agent run (Epic 3): one call drives links + a task through the
+// whole cycle (learn → skills → design → plan → verified build). `urls` is
+// bounded (>=1, capped) and `task` reuses the generous idea bound.
+const AGENT_URLS_MAX = 20;
+export const AgentRunSchema = z.object({
+  urls: z.array(z.string().url().max(URL_MAX)).min(1).max(AGENT_URLS_MAX),
+  task: z.string().min(3).max(IDEA_MAX),
+  // Bounded same-origin crawl per URL (same semantics as /learn `deep`).
+  deep: z.boolean().optional(),
+  lang: replyLang
+});
+
 // Per-user provider API keys. A string sets/replaces the key, `null` deletes it,
 // and omitting a field leaves it untouched. Keys are validated by provider prefix
 // and bounded in length (DoS / cost-abuse guard).

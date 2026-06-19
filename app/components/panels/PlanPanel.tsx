@@ -6,6 +6,7 @@ import { Icon } from "../../icons";
 import { downloadMd } from "../../api";
 import { downloadZip } from "../../zip";
 import { Markdown } from "../../markdown";
+import { ResultSkeleton } from "../Skeleton";
 
 type PlanFile = { path: string; content: string };
 type PlanPrompt = { title?: string; content: string };
@@ -65,9 +66,7 @@ export function PlanPanel({ g }: { g: GhostData }) {
       </div>
 
       {loading.plan ? (
-        <div className="result-box loading">
-          <span className="spinner" /> {t.working}
-        </div>
+        <ResultSkeleton label={t.working} />
       ) : planOutput?.error ? (
         <div className="result-box err">
           <strong>{t.errorWord}:</strong> {(t.errorCodes && t.errorCodes[String(planOutput.error)]) || String(planOutput.error)}

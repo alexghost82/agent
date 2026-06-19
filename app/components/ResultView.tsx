@@ -2,6 +2,7 @@
 
 import { Json } from "../api";
 import { Markdown } from "../markdown";
+import { ResultSkeleton } from "./Skeleton";
 
 /** Renders an action result: loading / empty / error (mapped code + requestId) / markdown blocks. */
 export function ResultView({
@@ -18,12 +19,7 @@ export function ResultView({
   const data = output[k];
   const isLoading = loading[k];
 
-  if (isLoading)
-    return (
-      <div className="result-box loading">
-        <span className="spinner" /> {t.working}
-      </div>
-    );
+  if (isLoading) return <ResultSkeleton label={t.working} />;
   if (!data) return <div className="result-box empty">{t.resultEmpty}</div>;
 
   if (data.error) {

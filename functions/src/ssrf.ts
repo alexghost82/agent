@@ -2,6 +2,9 @@ import * as net from "net";
 import { lookup } from "dns/promises";
 import * as cheerio from "cheerio";
 import { sameOrigin, parseSitemapUrls, resolveCrawlUrl } from "./pure";
+import { renderWithJs, jsRenderEnabled, JS_RENDER_MIN_TEXT } from "./render";
+import { extractPdfText } from "./pdf";
+import { log } from "./log";
 
 export function isPrivateIp(ip: string): boolean {
   const type = net.isIP(ip);
@@ -86,20 +89,39 @@ export async function readUrl(rawUrl: string): Promise<{ title: string; text: st
     });
     if (!response.ok) throw new Error(`Failed to fetch ${rawUrl}: ${response.status}`);
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    const raw = await response.text();
+    // Read the body once as bytes so PDFs can be parsed properly (Epic 1.4) and
+    // HTML can still be decoded as UTF-8.
+    const buf = Buffer.from(await response.arrayBuffer());
 
-    // PDFs are served as text/plain extraction best-effort: many docs hosts
-    // return an HTML viewer, so we still parse as HTML when it is not a real PDF.
+    // Real PDF parsing behind a seam (Epic 1.4). Many doc hosts serve an HTML
+    // viewer instead, so only the real application/pdf content-type takes this path.
     if (contentType.includes("application/pdf")) {
-      const text = raw.replace(/[^\x20-\x7E\s]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160000);
+      const text = (await extractPdfText(buf)).slice(0, 160000);
       return { title: rawUrl, text };
     }
 
-    const html = raw.slice(0, 3_000_000);
+    const html = buf.toString("utf8").slice(0, 3_000_000);
     const $ = cheerio.load(html);
     $("script, style, nav, footer, header, noscript, svg").remove();
     const title = $("title").text().trim() || rawUrl;
-    const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, 160000);
+    let text = $("body").text().replace(/\s+/g, " ").trim().slice(0, 160000);
+
+    // JS-render fallback (Epic 1.3): a near-empty body usually means the content
+    // is hydrated client-side. Re-fetch through the headless renderer, but only
+    // when explicitly enabled — and re-assert the SSRF guard first because the
+    // renderer does its own network navigation.
+    if (text.length < JS_RENDER_MIN_TEXT && jsRenderEnabled()) {
+      await assertPublicHttpUrl(rawUrl);
+      try {
+        const rendered = (await renderWithJs(rawUrl)).replace(/\s+/g, " ").trim().slice(0, 160000);
+        if (rendered.length > text.length) text = rendered;
+      } catch (err) {
+        log("warn", "js_render_failed", {
+          url: rawUrl,
+          message: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
     return { title, text };
   } finally {
     clearTimeout(timeout);

@@ -16,7 +16,9 @@ import {
   sameOrigin,
   parseSitemapUrls,
   resolveCrawlUrl,
-  staticBuildChecks
+  staticBuildChecks,
+  deriveSubqueries,
+  selectSkillsForTask
 } from "../src/pure";
 
 describe("chunkText", () => {
@@ -28,6 +30,46 @@ describe("chunkText", () => {
   it("collapses whitespace and drops empties", () => {
     expect(chunkText("   hello    world   ")).toEqual(["hello world"]);
     expect(chunkText("   ")).toEqual([]);
+  });
+
+  it("packs whole sentences without splitting them mid-sentence (Epic 1.2)", () => {
+    const s1 = "The agent learns by reading public documentation pages.";
+    const s2 = "It then chunks that text on sentence boundaries for retrieval.";
+    const s3 = "Each chunk should stay a coherent unit of meaning.";
+    const chunks = chunkText([s1, s2, s3].join(" "), 120);
+    expect(chunks.length).toBeGreaterThan(1);
+    // No chunk exceeds the cap.
+    expect(chunks.every((c) => c.length <= 120)).toBe(true);
+    // Every original sentence survives intact inside at least one chunk.
+    for (const s of [s1, s2, s3]) {
+      expect(chunks.some((c) => c.includes(s))).toBe(true);
+    }
+  });
+
+  it("adds overlap between neighbouring chunks (Epic 1.2)", () => {
+    const sentences = Array.from({ length: 8 }, (_, i) => `Sentence number ${i} carries some context.`);
+    const chunks = chunkText(sentences.join(" "), 100);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.length <= 100)).toBe(true);
+    // Consecutive chunks share at least one sentence (the trailing overlap).
+    let sharedBoundary = 0;
+    for (let i = 1; i < chunks.length; i++) {
+      const prevSentences = chunks[i - 1].split(/(?<=[.!?])\s+/);
+      const overlaps = prevSentences.some((s) => s.trim() && chunks[i].includes(s.trim()));
+      if (overlaps) sharedBoundary += 1;
+    }
+    expect(sharedBoundary).toBeGreaterThan(0);
+  });
+
+  it("hard-splits an oversized single word so no chunk exceeds maxChars", () => {
+    const chunks = chunkText("x".repeat(250), 100);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.length <= 100)).toBe(true);
+  });
+
+  it("treats blank-line separated paragraphs as boundaries", () => {
+    const chunks = chunkText("First paragraph here.\n\nSecond paragraph here.", 200);
+    expect(chunks).toEqual(["First paragraph here. Second paragraph here."]);
   });
 });
 
@@ -151,6 +193,71 @@ describe("normalizeBuildFiles (build, CONTRACT v2.2)", () => {
   it("returns [] for non-array / invalid input", () => {
     expect(normalizeBuildFiles(null, 40, 100_000)).toEqual([]);
     expect(normalizeBuildFiles([{ path: 1, content: 2 }], 40, 100_000)).toEqual([]);
+  });
+});
+
+describe("deriveSubqueries (Epic 2.2)", () => {
+  it("builds an identity query plus instructions and a task breakdown", () => {
+    const qs = deriveSubqueries({
+      name: "Ghost",
+      description: "An autonomous agent.",
+      instructions: "Add caching. Wire up rate limits."
+    });
+    expect(qs[0]).toBe("Ghost An autonomous agent.");
+    expect(qs).toContain("Add caching. Wire up rate limits.");
+    // Sentence-level breakdown surfaces individual sub-tasks.
+    expect(qs.some((q) => q.includes("Add caching"))).toBe(true);
+    expect(qs.some((q) => q.includes("Wire up rate limits"))).toBe(true);
+  });
+
+  it("dedups, trims whitespace and respects maxQueries", () => {
+    const qs = deriveSubqueries(
+      { name: "A", description: "Long detailed text. More sentences here. And another one. Yet more text follows." },
+      3
+    );
+    expect(qs.length).toBeLessThanOrEqual(3);
+    expect(new Set(qs).size).toBe(qs.length);
+    expect(qs.every((q) => q === q.trim())).toBe(true);
+  });
+
+  it("falls back to the name when nothing else is usable", () => {
+    expect(deriveSubqueries({ name: "Solo" })).toEqual(["Solo"]);
+    expect(deriveSubqueries({})).toEqual([]);
+  });
+});
+
+describe("selectSkillsForTask (Epic 3.3)", () => {
+  const skills = [
+    { id: "s1", skillName: "Next.js routing", description: "App router patterns", appliesTo: ["nextjs", "react"] },
+    { id: "s2", skillName: "Firestore rules", description: "Secure deny-all rules", appliesTo: ["firestore", "firebase"] },
+    { id: "s3", skillName: "Rust ownership", description: "Borrow checker tips", appliesTo: ["rust"] },
+    { id: "s4", skillName: "Generic logging", description: "Structured logs", appliesTo: [] }
+  ];
+
+  it("matches skills by appliesTo against the stack (strong signal)", () => {
+    const picked = selectSkillsForTask(skills, "Build a web dashboard", "Next.js + Firestore");
+    const ids = picked.map((s) => s.id);
+    expect(ids).toContain("s1");
+    expect(ids).toContain("s2");
+    expect(ids).not.toContain("s3");
+  });
+
+  it("matches by task keywords when no stack is given", () => {
+    const picked = selectSkillsForTask(skills, "I need firestore security rules for my app");
+    expect(picked.map((s) => s.id)).toContain("s2");
+  });
+
+  it("ranks stronger matches first and respects the cap", () => {
+    const picked = selectSkillsForTask(skills, "nextjs react firestore", "nextjs", 1);
+    expect(picked).toHaveLength(1);
+    // s1 (nextjs+react tags both hit) outranks s2 (only firestore).
+    expect(picked[0].id).toBe("s1");
+  });
+
+  it("returns [] when nothing matches or inputs are empty", () => {
+    expect(selectSkillsForTask(skills, "cobol mainframe batch jobs")).toEqual([]);
+    expect(selectSkillsForTask(skills, "")).toEqual([]);
+    expect(selectSkillsForTask([], "nextjs")).toEqual([]);
   });
 });
 

@@ -180,6 +180,7 @@ private struct MainShellView: View {
         case .design: DesignParityPanel()
         case .plan: PlanParityPanel()
         case .build: BuildParityPanel()
+        case .autorun: AutorunParityPanel()
         case .memory: MemoryParityPanel()
         case .settings: SettingsParityPanel()
         }

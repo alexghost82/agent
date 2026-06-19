@@ -2,11 +2,102 @@
 
 import { createHash } from "node:crypto";
 
+// Semantic chunking (Epic 1.1/1.2): split on paragraph then sentence boundaries
+// so a chunk is a coherent unit of meaning instead of an arbitrary character
+// window. Sentences are packed greedily up to `maxChars`, neighbouring chunks
+// share a small trailing overlap (~OVERLAP_CHARS) so retrieval keeps context
+// across the boundary, and over-long sentences/words are split as a last resort
+// so no chunk ever exceeds `maxChars`.
+const OVERLAP_CHARS = 200;
+
+// Split a paragraph into sentence-ish units on terminal punctuation. Keeps the
+// punctuation attached to the sentence it ends.
+function splitSentences(paragraph: string): string[] {
+  return paragraph
+    .split(/(?<=[.!?。！？])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Hard-split a single unit that is longer than `maxChars` on word boundaries,
+// falling back to a raw character split for a single oversized "word".
+function hardSplit(unit: string, maxChars: number): string[] {
+  if (unit.length <= maxChars) return [unit];
+  const out: string[] = [];
+  let buf = "";
+  for (const word of unit.split(" ")) {
+    const piece = buf ? `${buf} ${word}` : word;
+    if (piece.length <= maxChars) {
+      buf = piece;
+      continue;
+    }
+    if (buf) {
+      out.push(buf);
+      buf = "";
+    }
+    if (word.length > maxChars) {
+      for (let i = 0; i < word.length; i += maxChars) out.push(word.slice(i, i + maxChars));
+    } else {
+      buf = word;
+    }
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+
+// Take whole trailing units (newest first) whose combined length stays within
+// `overlapChars`, preserving their original order. Used to seed the next chunk
+// with the tail of the previous one.
+function tailOverlap(units: string[], overlapChars: number): string[] {
+  const out: string[] = [];
+  let len = 0;
+  for (let i = units.length - 1; i >= 0; i--) {
+    const unit = units[i];
+    const add = (out.length ? 1 : 0) + unit.length;
+    if (len + add > overlapChars) break;
+    out.unshift(unit);
+    len += add;
+  }
+  return out;
+}
+
 export function chunkText(text: string, maxChars = 2200): string[] {
-  const clean = text.replace(/\s+/g, " ").trim();
+  const overlapChars = Math.min(OVERLAP_CHARS, Math.floor(maxChars / 2));
+
+  // Build a flat list of sentence-sized units, each guaranteed <= maxChars.
+  const units: string[] = [];
+  for (const paragraph of String(text).replace(/\r\n?/g, "\n").split(/\n\s*\n+/)) {
+    const clean = paragraph.replace(/\s+/g, " ").trim();
+    if (!clean) continue;
+    for (const sentence of splitSentences(clean)) {
+      for (const piece of hardSplit(sentence, maxChars)) units.push(piece);
+    }
+  }
+
   const chunks: string[] = [];
-  for (let i = 0; i < clean.length; i += maxChars) chunks.push(clean.slice(i, i + maxChars));
-  return chunks.filter(Boolean);
+  let current: string[] = [];
+  let currentLen = 0;
+
+  for (const unit of units) {
+    const sep = current.length ? 1 : 0;
+    if (current.length && currentLen + sep + unit.length > maxChars) {
+      chunks.push(current.join(" "));
+      // Seed the next chunk with the tail of this one, then trim that overlap
+      // until it leaves room for the incoming unit (units are always <= maxChars).
+      let overlap = tailOverlap(current, overlapChars);
+      while (overlap.length && overlap.join(" ").length + 1 + unit.length > maxChars) {
+        overlap = overlap.slice(1);
+      }
+      current = overlap;
+      currentLen = overlap.join(" ").length;
+    }
+    const sep2 = current.length ? 1 : 0;
+    current.push(unit);
+    currentLen += sep2 + unit.length;
+  }
+  if (current.length) chunks.push(current.join(" "));
+
+  return chunks.filter((c) => c.trim().length > 0);
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -252,6 +343,115 @@ export function scoreExtractedSkill(s: SkillLike): SkillQuality {
   if (Array.isArray(s.appliesTo) && s.appliesTo.length > 0) score += 0.1;
   score = Math.min(1, Math.round(score * 100) / 100);
   return { score, rationale: reasons.length ? reasons.join("; ") : "ok" };
+}
+
+// --- Context retrieval subqueries (Epic 2.2) -------------------------------
+
+// Derive several focused subqueries from the fields a consumer has on hand so
+// retrieval (`gatherContext`) can fan out across the corpus instead of issuing
+// a single broad query. Pure + deterministic so it is unit-testable. Produces:
+//   1. an identity query (project name + description),
+//   2. the free-form instructions / idea / section, when present,
+//   3. a sentence-level breakdown of the task text (so distinct sub-tasks each
+//      get their own retrieval pass).
+// Results are trimmed, de-duplicated, and bounded by `maxQueries`.
+export function deriveSubqueries(
+  parts: { name?: string; description?: string; instructions?: string; section?: string },
+  maxQueries = 6
+): string[] {
+  const name = (parts.name || "").trim();
+  const description = (parts.description || "").trim();
+  const instructions = (parts.instructions || "").trim();
+  const section = (parts.section || "").trim();
+
+  const queries: string[] = [];
+  const push = (s: string): void => {
+    const t = s.replace(/\s+/g, " ").trim();
+    if (t && !queries.includes(t)) queries.push(t);
+  };
+
+  push([name, description].filter(Boolean).join(" "));
+  if (instructions) push(instructions);
+  if (section) push(section);
+
+  // Task breakdown: split the most task-specific text into sentence-ish units
+  // so each distinct ask gets its own retrieval pass.
+  const breakdown = [instructions, section, description].filter(Boolean).join(". ");
+  for (const sentence of breakdown.split(/(?<=[.!?\n])\s+/)) {
+    if (queries.length >= maxQueries) break;
+    const s = sentence.replace(/\s+/g, " ").trim();
+    if (s.length >= 12) push(s);
+  }
+
+  if (!queries.length && name) push(name);
+  return queries.slice(0, maxQueries);
+}
+
+// --- Autonomous agent skill auto-selection (Epic 3.3) ----------------------
+
+export interface SelectableSkill {
+  id: string;
+  skillName?: unknown;
+  description?: unknown;
+  appliesTo?: unknown;
+}
+
+// Normalize a token to alphanumerics only so "Next.js" / "nextjs" / "next-js"
+// all compare equal.
+function normToken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Split free text into a set of normalized tokens (length >= 2).
+function tokenSet(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of String(text).toLowerCase().split(/[^a-z0-9+#.]+/)) {
+    const n = normToken(raw);
+    if (n.length >= 2) out.add(n);
+  }
+  return out;
+}
+
+// Common words that carry no selection signal, excluded from name/description
+// overlap scoring.
+const SKILL_STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "from", "into", "your", "you",
+  "use", "using", "build", "make", "create", "add", "app", "application",
+  "project", "code", "data", "skill", "skills", "agent", "system", "feature"
+]);
+
+// Pure, deterministic skill→task matcher (Epic 3.3). Scores each skill by how
+// well its `appliesTo` tags (strong signal) and name/description keywords (weak
+// signal) match the task text + stack, and returns the best matches (score > 0)
+// sorted by score, capped at `max`. Used by the autonomous agent route to
+// auto-pick skills when the user did not choose any. No I/O — unit-testable.
+export function selectSkillsForTask(
+  skills: SelectableSkill[],
+  task: string,
+  stack?: string,
+  max = 12
+): SelectableSkill[] {
+  const haystack = tokenSet(`${task || ""} ${stack || ""}`);
+  if (!haystack.size) return [];
+
+  const scored: { skill: SelectableSkill; score: number }[] = [];
+  for (const skill of skills) {
+    const appliesTo = Array.isArray(skill.appliesTo) ? skill.appliesTo.map((x) => normToken(String(x))).filter(Boolean) : [];
+    let score = 0;
+    for (const tag of appliesTo) {
+      if (haystack.has(tag)) score += 3;
+    }
+    let nameHits = 0;
+    for (const tok of tokenSet(`${typeof skill.skillName === "string" ? skill.skillName : ""} ${typeof skill.description === "string" ? skill.description : ""}`)) {
+      if (SKILL_STOPWORDS.has(tok)) continue;
+      if (haystack.has(tok)) nameHits += 1;
+    }
+    score += Math.min(nameHits, 3); // cap weak-signal contribution
+    if (score > 0) scored.push({ skill, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, max).map((s) => s.skill);
 }
 
 // Validate + sanitize a raw `{path, content}[]` proposal from the model into

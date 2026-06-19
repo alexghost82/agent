@@ -29,6 +29,11 @@ export function useGhostData() {
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [output, setOutput] = useState<Record<string, Json | null>>({});
 
+  // Live phase of the in-flight autopilot run (polled from agent_runs while the
+  // blocking /agent/run call is still resolving), so the UI shows real progress.
+  const [agentRun, setAgentRun] = useState<Json | null>(null);
+  const agentBaselineRef = useRef<string | null>(null);
+
   const [stats, setStats] = useState<Json | null>(null);
   const [topics, setTopics] = useState<Json[]>([]);
   const [sources, setSources] = useState<Json[]>([]);
@@ -254,6 +259,35 @@ export function useGhostData() {
       }
     };
   }, [auth, ingesting, loadProjects, loadDashboard]);
+
+  /* ---------------- live agent-run progress polling ---------------- */
+  // While /agent/run is in flight, poll the run list and lock onto the newest
+  // run that did not exist before we started (vs. the captured baseline). The
+  // server streams real phase transitions into that doc (status + steps).
+  useEffect(() => {
+    if (!auth || !loading.agent) {
+      setAgentRun(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await getJson("/agent/runs");
+        const runs = (r.runs || []) as Json[];
+        const newest = runs[0] || null;
+        const live = newest && String(newest.id) !== agentBaselineRef.current ? newest : null;
+        if (!cancelled) setAgentRun(live);
+      } catch {
+        /* polling is best-effort */
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [auth, loading.agent]);
 
   /* ---------------- topic / source actions ---------------- */
   const createTopic = useCallback(
@@ -501,6 +535,40 @@ export function useGhostData() {
     [run]
   );
 
+  /* ---------------- autonomous agent (Epic 3) ---------------- */
+  const runAgent = useCallback(
+    async (urls: string[], task: string, deep: boolean) =>
+      run("agent", async () => {
+        const cleanUrls = urls.map((u) => u.trim()).filter(Boolean);
+        // Remember the newest existing run so the poller can identify the new one.
+        try {
+          const existing = await getJson("/agent/runs");
+          const top = (existing.runs as Json[] | undefined)?.[0];
+          agentBaselineRef.current = top?.id ? String(top.id) : null;
+        } catch {
+          agentBaselineRef.current = null;
+        }
+        setAgentRun(null);
+        const r = await postJson("/agent/run", {
+          urls: cleanUrls,
+          task: task.trim(),
+          deep: deep || undefined,
+          lang
+        });
+        // The run materialized a topic/project/build — refresh the lists.
+        loadTopics();
+        loadProjects();
+        loadDashboard();
+        return r;
+      }),
+    [run, loadTopics, loadProjects, loadDashboard, lang]
+  );
+
+  const loadAgentRun = useCallback(
+    async (id: string) => run("agentRun", () => getJson(`/agent/runs/${encodeURIComponent(id)}`)),
+    [run]
+  );
+
   return {
     // i18n / prefs
     lang,
@@ -527,6 +595,7 @@ export function useGhostData() {
     loading,
     output,
     run,
+    agentRun,
     // data
     stats,
     topics,
@@ -572,7 +641,9 @@ export function useGhostData() {
     design,
     generatePlan,
     build,
-    openBuild
+    openBuild,
+    runAgent,
+    loadAgentRun
   };
 }
 

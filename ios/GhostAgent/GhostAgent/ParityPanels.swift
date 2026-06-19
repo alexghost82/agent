@@ -718,8 +718,70 @@ struct SettingsParityPanel: View {
             }
             ProviderKeyCard(provider: "openai", input: $openAI)
             ProviderKeyCard(provider: "gemini", input: $gemini)
+            DiagnosticsCard()
         }
         .task { await model.loadKeys() }
+    }
+}
+
+/// Read-only configuration diagnostics: API base URL and Firebase status
+/// (SPECS §D req 1 & 6). No secrets are shown — the bearer token lives only in
+/// the Keychain and is never surfaced here.
+private struct DiagnosticsCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        BrandCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(model.t("diagnosticsSection")).font(.headline.weight(.black))
+                Text(model.t("diagnosticsHint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                diagnosticRow(label: model.t("diagApiBase"), value: model.apiBaseURLString)
+
+                HStack(alignment: .top) {
+                    Text(model.t("diagFirebase"))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    StatusChip(
+                        title: model.firebaseStatusLabel(),
+                        systemImage: firebaseConfigured ? "checkmark.seal.fill" : "exclamationmark.triangle.fill",
+                        color: firebaseConfigured ? BrandTheme.ColorToken.ok : BrandTheme.ColorToken.warn
+                    )
+                }
+
+                if let projectID = model.firebaseProjectID, !projectID.isEmpty {
+                    diagnosticRow(label: model.t("diagProjectId"), value: projectID)
+                }
+
+                if model.session != nil {
+                    Label(model.t("diagSessionActive"), systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(BrandTheme.ColorToken.ok)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var firebaseConfigured: Bool {
+        if case .configured = model.firebaseStatus { return true }
+        return false
+    }
+
+    private func diagnosticRow(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1203,6 +1265,219 @@ private struct VerificationView: View {
         switch status {
         case "passed": return BrandTheme.ColorToken.ok
         case "failed", "error": return BrandTheme.ColorToken.danger
+        default: return BrandTheme.ColorToken.warn
+        }
+    }
+}
+
+// MARK: - Autorun parity panel (web `AgentPanel`, Epic 3 full autopilot)
+
+struct AutorunParityPanel: View {
+    @Environment(AppModel.self) private var model
+    @State private var urls = ""
+    @State private var task = ""
+    @State private var deep = false
+    @State private var openingId = ""
+
+    /// Accept several URLs at once: one per line or comma separated.
+    private var parsedUrls: [String] {
+        urls
+            .split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var isRunning: Bool { model.loading.contains("agent") }
+    private var result: AgentRunResult? { model.agentResult }
+    private var canRun: Bool {
+        !isRunning && !parsedUrls.isEmpty && task.trimmingCharacters(in: .whitespaces).count >= 3
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Explain(model.t("agentExplain"))
+            BrandCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(model.t("agentUrlsLabel"))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    TextField("https://example.com/docs", text: $urls, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(3...6)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text(model.t("agentTaskLabel"))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    TextField(model.t("agentTaskPlaceholder"), text: $task, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(3...8)
+                    Toggle(model.t("agentDeepLabel"), isOn: $deep)
+                        .tint(BrandTheme.ColorToken.accent)
+                    Button {
+                        Task { await model.runAgent(urls: parsedUrls, task: task, deep: deep) }
+                    } label: {
+                        Label(isRunning ? model.t("agentRunning") : model.t("agentRunBtn"), systemImage: "wand.and.stars")
+                    }
+                    .buttonStyle(PrimaryBrandButtonStyle())
+                    .disabled(!canRun)
+                }
+            }
+
+            if isRunning {
+                BrandCard {
+                    HStack { ProgressView(); Text(model.t("agentRunning")) }
+                        .foregroundStyle(.secondary)
+                }
+            } else if let code = model.agentErrorCode {
+                BrandCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(model.t("errorWord")): \(mappedError(code))")
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(BrandTheme.ColorToken.danger)
+                        if let requestId = model.agentRequestId {
+                            Text("\(model.t("requestId")): \(requestId)")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } else if let result {
+                if !result.steps.isEmpty {
+                    ListBlock(title: model.t("agentSteps")) {
+                        ForEach(result.steps) { AgentStepRow(step: $0) }
+                    }
+                }
+                if !result.summary.isEmpty {
+                    ListBlock(title: model.t("buildSummary")) {
+                        BrandCard {
+                            Text(result.summary)
+                                .font(.subheadline)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                if !result.files.isEmpty {
+                    ListBlock(title: "\(model.t("agentResultFiles")) (\(result.files.count))") {
+                        ForEach(result.files) { file in
+                            GeneratedBlock(title: file.path, content: file.content, shareName: file.path)
+                        }
+                    }
+                }
+            } else {
+                BrandCard {
+                    Text(model.t("agentNoRunYet")).foregroundStyle(.secondary)
+                }
+            }
+
+            ListBlock(title: model.t("agentPastRuns"), refresh: { Task { await model.loadAgentRuns() } }) {
+                if model.agentRuns.isEmpty {
+                    Text(model.t("agentNoRunYet")).foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.agentRuns) { run in
+                        AgentRunRow(run: run, openingId: $openingId)
+                    }
+                }
+            }
+        }
+    }
+
+    private func mappedError(_ code: String) -> String {
+        let mapped = model.t.g("errorCodes", code)
+        return mapped == code ? code : mapped
+    }
+}
+
+private struct AgentStepRow: View {
+    @Environment(AppModel.self) private var model
+    let step: AgentStep
+
+    var body: some View {
+        BrandCard(padding: 12) {
+            HStack(alignment: .top) {
+                Text(model.t.g("agentStepNames", step.name))
+                    .font(.subheadline.weight(.heavy))
+                Spacer()
+                if let detail = step.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                StatusChip(title: step.status, systemImage: "circle.dotted", color: statusColor)
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        switch step.status {
+        case "done", "ready": return BrandTheme.ColorToken.ok
+        case "error": return BrandTheme.ColorToken.danger
+        default: return BrandTheme.ColorToken.warn
+        }
+    }
+}
+
+private struct AgentRunRow: View {
+    @Environment(AppModel.self) private var model
+    let run: AgentRun
+    @Binding var openingId: String
+
+    private var opened: AgentRun? {
+        (openingId == run.id && model.agentStatus?.id == run.id) ? model.agentStatus : nil
+    }
+
+    var body: some View {
+        BrandCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    Text(run.task ?? run.id)
+                        .font(.subheadline.weight(.heavy))
+                        .lineLimit(2)
+                    Spacer()
+                    StatusChip(title: statusLabel(run.status), systemImage: "circle.dotted", color: statusColor(run.status))
+                }
+                HStack {
+                    StatusChip(title: "\(run.steps.count) \(model.t("agentSteps"))", systemImage: "list.bullet", color: BrandTheme.ColorToken.accent)
+                    Spacer()
+                    Button(model.t("openBuildBtn"), systemImage: "arrow.up.forward.app") {
+                        openingId = run.id
+                        Task { await model.openAgentRun(id: run.id) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(run.id.isEmpty)
+                }
+                if let opened {
+                    ForEach(opened.steps) { step in
+                        HStack {
+                            Text(model.t.g("agentStepNames", step.name))
+                                .font(.caption.weight(.heavy))
+                            Spacer()
+                            Text(step.status)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let code = opened.errorCode, !code.isEmpty {
+                        Text("\(model.t("errorWord")): \(code)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(BrandTheme.ColorToken.danger)
+                    }
+                }
+            }
+        }
+    }
+
+    private func statusLabel(_ status: String) -> String {
+        let mapped = model.t.g("agentStepNames", status)
+        return mapped == status ? status : mapped
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status {
+        case "ready": return BrandTheme.ColorToken.ok
+        case "error": return BrandTheme.ColorToken.danger
         default: return BrandTheme.ColorToken.warn
         }
     }

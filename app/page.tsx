@@ -7,6 +7,7 @@ import { useGhostData } from "./useGhostData";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
 import { OverviewPanel } from "./components/panels/OverviewPanel";
+import { AgentPanel } from "./components/panels/AgentPanel";
 import { SourcesPanel } from "./components/panels/SourcesPanel";
 import { SkillsPanel } from "./components/panels/SkillsPanel";
 import { ProjectsPanel } from "./components/panels/ProjectsPanel";
@@ -44,6 +45,7 @@ export default function Home() {
         </header>
 
         {active === "overview" && <OverviewPanel g={g} />}
+        {active === "agent" && <AgentPanel g={g} />}
         {active === "sources" && <SourcesPanel g={g} />}
         {active === "skills" && <SkillsPanel g={g} />}
         {active === "projects" && <ProjectsPanel g={g} />}

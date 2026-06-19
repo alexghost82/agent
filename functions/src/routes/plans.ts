@@ -1,9 +1,9 @@
 import { Router, Response } from "express";
 import { db } from "../firebase";
 import { serverTime, logEvent } from "../util";
-import { safeJsonObject } from "../pure";
+import { safeJsonObject, deriveSubqueries } from "../pure";
 import { llm } from "../ai";
-import { searchMemory } from "../memory";
+import { gatherContext } from "../memory";
 import { rateLimit } from "../ratelimit";
 import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
@@ -71,20 +71,17 @@ plansRouter.post("/generate-plan", rateLimit("generate-plan", 12, 60_000), distr
       .map((d) => `### ${(d as { section?: string }).section || "Общий дизайн"}\n${(d as { decision?: string }).decision || ""}`)
       .join("\n\n");
 
-    let context = await searchMemory(
-      `${project.name} ${project.description} ${instructions || ""}`,
-      { userId: req.userId!, projectId },
-      16
-    );
+    const subqueries = deriveSubqueries({
+      name: project.name,
+      description: project.description,
+      instructions
+    });
+    let context = await gatherContext(subqueries, { userId: req.userId!, projectId }, { maxChunks: 40, charBudget: 16000 });
     // Greenfield (from-scratch) projects have no project-scoped chunks; fall
     // back to the user's whole learned memory so plans build on studied topics.
     // Additive: only adds context when the scoped search returned nothing.
     if (!context.length) {
-      context = await searchMemory(
-        `${project.name} ${project.description} ${instructions || ""}`,
-        { userId: req.userId! },
-        16
-      );
+      context = await gatherContext(subqueries, { userId: req.userId! }, { maxChunks: 40, charBudget: 16000 });
     }
     const contextText = context.map((c, i) => `[${i + 1}] ${c.title || c.sourcePath}: ${c.content}`).join("\n\n");
 

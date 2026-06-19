@@ -65,6 +65,39 @@ struct APIClient {
         try await request("DELETE", path: path, body: Optional<String>.none, token: token)
     }
 
+    // MARK: - Autonomous agent (Autorun, Epic 3)
+
+    /// Kick off the full autopilot cycle (`POST /agent/run`). Protected (Bearer).
+    /// The call blocks until the verified build is ready and returns its files,
+    /// summary and orchestration steps. Decoded into `AgentRunResult`; an error
+    /// envelope (`{ error, requestId }`) is mapped to `APIClientError.server`.
+    func agentRun(urls: [String], task: String, deep: Bool, lang: String, token: String) async throws -> AgentRunResult {
+        let body: JSONObject = [
+            "urls": .array(urls.map(JSONValue.string)),
+            "task": .string(task),
+            "deep": .bool(deep),
+            "lang": .string(lang)
+        ]
+        return try await request("POST", path: "/agent/run", body: body, token: token)
+    }
+
+    /// Fetch a single owned agent run with its live status and steps
+    /// (`GET /agent/runs/:id`). Protected (Bearer).
+    func agentRunStatus(id: String, token: String) async throws -> AgentRun {
+        let envelope: AgentRunEnvelope = try await request(
+            "GET", path: "/agent/runs/\(id)", body: Optional<String>.none, token: token
+        )
+        return envelope.run
+    }
+
+    /// List the caller's agent runs, newest first (`GET /agent/runs`). Protected.
+    func agentRuns(token: String) async throws -> [AgentRun] {
+        let envelope: AgentRunsEnvelope = try await request(
+            "GET", path: "/agent/runs", body: Optional<String>.none, token: token
+        )
+        return envelope.runs
+    }
+
     private func request<Response: Decodable, Body: Encodable>(
         _ method: String,
         path: String,
