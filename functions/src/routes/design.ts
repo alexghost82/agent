@@ -17,13 +17,45 @@ import { recordUsage } from "../usage";
 
 export const designRouter = Router();
 
-async function selectedSkills(userId: string, skillIds: string[]): Promise<string> {
-  if (!skillIds.length) return "(no skills selected)";
-  const docs = await Promise.all(skillIds.slice(0, 40).map((id) => db.collection("agent_skills").doc(id).get()));
-  const lines = docs
-    .filter((d) => d.exists && d.data()?.userId === userId)
-    .map((d) => `- ${d.data()?.skillName}: ${d.data()?.description}`);
-  return lines.length ? lines.join("\n") : "(no skills selected)";
+// Cap the total number of skills folded into a design prompt (token/cost guard).
+const MAX_DESIGN_SKILLS = 60;
+
+// Build the "selected skills" prompt text from the project's saved skill ids and,
+// optionally, every skill belonging to the selected skill categories (topicIds).
+// Both sources are owner-scoped, de-duplicated by skill id and bounded.
+async function selectedSkills(userId: string, skillIds: string[], topicIds: string[] = []): Promise<string> {
+  const byId = new Map<string, { skillName: unknown; description: unknown }>();
+
+  const idDocs = await Promise.all(
+    skillIds.slice(0, MAX_DESIGN_SKILLS).map((id) => db.collection("agent_skills").doc(id).get())
+  );
+  for (const d of idDocs) {
+    if (d.exists && d.data()?.userId === userId) {
+      byId.set(d.id, { skillName: d.data()?.skillName, description: d.data()?.description });
+    }
+  }
+
+  // Firestore `in` supports up to 10 values, so query one topic at a time.
+  for (const topicId of topicIds.slice(0, 50)) {
+    if (byId.size >= MAX_DESIGN_SKILLS) break;
+    const snap = await db
+      .collection("agent_skills")
+      .where("userId", "==", userId)
+      .where("topicId", "==", topicId)
+      .limit(MAX_DESIGN_SKILLS)
+      .get();
+    for (const d of snap.docs) {
+      if (byId.size >= MAX_DESIGN_SKILLS) break;
+      if (!byId.has(d.id)) {
+        byId.set(d.id, { skillName: d.data()?.skillName, description: d.data()?.description });
+      }
+    }
+  }
+
+  if (!byId.size) return "(no skills selected)";
+  return Array.from(byId.values())
+    .map((s) => `- ${s.skillName}: ${s.description}`)
+    .join("\n");
 }
 
 designRouter.get("/design", async (req: AuthedRequest, res: Response) => {
@@ -43,7 +75,7 @@ designRouter.get("/design", async (req: AuthedRequest, res: Response) => {
 
 designRouter.post("/design", rateLimit("design", 20, 60_000), distributedRateLimit("design", 100, 3_600_000), async (req: AuthedRequest, res: Response) => {
   try {
-    const { projectId, section, lang } = DesignSchema.parse(req.body);
+    const { projectId, section, topicIds, lang } = DesignSchema.parse(req.body);
     const replyLang = normalizeLang(lang);
     const projDoc = await db.collection("projects").doc(projectId).get();
     if (!projDoc.exists || projDoc.data()?.userId !== req.userId) {
@@ -51,7 +83,7 @@ designRouter.post("/design", rateLimit("design", 20, 60_000), distributedRateLim
       return;
     }
     const project = projDoc.data()!;
-    const skillsText = await selectedSkills(req.userId!, project.skillIds || []);
+    const skillsText = await selectedSkills(req.userId!, project.skillIds || [], topicIds || []);
     // A project without an ingested repo summary is treated as greenfield
     // (built from scratch from the description + learned knowledge + skills).
     const greenfield = !project.summary;

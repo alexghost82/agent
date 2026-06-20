@@ -113,7 +113,27 @@ export const DesignSchema = z.object({
   // Free-form platform idea / direction / section / module (all optional).
   // Kept as `section` for backward compatibility with the existing API.
   section: z.string().max(IDEA_MAX).optional(),
+  // Optional skill categories (topic ids): when present, the design step also
+  // pulls in skills belonging to these topics. Backward compatible when absent.
+  topicIds: z.array(z.string().min(3).max(ID_MAX)).max(50).optional(),
   lang: replyLang
+});
+
+// Persisted n8n-style flow map for a project (one doc per project+kind). Nodes
+// and edges are loose objects from the client editor; bounded to guard DoS/cost.
+const MAP_ITEMS_MAX = 500;
+export const FlowMapSchema = z.object({
+  kind: z.enum(["design", "project"]),
+  nodes: z.array(z.record(z.string(), z.unknown())).max(MAP_ITEMS_MAX),
+  edges: z.array(z.record(z.string(), z.unknown())).max(MAP_ITEMS_MAX)
+});
+
+// Project-intelligence scan request. Body is optional; both fields default
+// server-side. `depth` bounds the graph; `ai` enables the (clearly-marked)
+// AI summary layer.
+export const ScanRequestSchema = z.object({
+  depth: z.number().int().min(1).max(30).optional(),
+  ai: z.boolean().optional()
 });
 
 export const GeneratePlanSchema = z.object({

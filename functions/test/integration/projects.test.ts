@@ -50,6 +50,34 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: projects router", () => {
     expect(patch.body.status).toBe("updated");
   });
 
+  it("deletes an owned project and removes its scoped data", async () => {
+    const user = await seedUser();
+    const create = await srv.request("POST", "/projects", {
+      token: user.token,
+      body: { name: "Disposable", description: "project to be deleted" }
+    });
+    const id = create.body.id;
+    // Seed data scoped to the project that must be cleaned up on delete.
+    await addDoc("knowledge_chunks", { userId: user.userId, projectId: id, content: "x", scope: "project" });
+    await addDoc("project_decisions", { userId: user.userId, projectId: id, decision: "d" });
+    await addDoc("generated_plans", { userId: user.userId, projectId: id, files: [] });
+
+    const del = await srv.request("DELETE", `/projects/${id}`, { token: user.token });
+    expect(del.status).toBe(200);
+    expect(del.body.status).toBe("deleted");
+
+    const list = await srv.request("GET", "/projects", { token: user.token });
+    expect(list.body.projects.map((p: any) => p.id)).not.toContain(id);
+  });
+
+  it("returns 404 deleting a project the caller does not own", async () => {
+    const owner = await seedUser();
+    const other = await seedUser();
+    const id = await addDoc("projects", { userId: owner.userId, name: "Owned", description: "owned project" });
+    const res = await srv.request("DELETE", `/projects/${id}`, { token: other.token });
+    expectError(res, 404, "not_found");
+  });
+
   it("rejects an invalid project body (validation, 400)", async () => {
     const user = await seedUser();
     const res = await srv.request("POST", "/projects", {

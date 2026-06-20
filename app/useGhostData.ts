@@ -7,6 +7,7 @@ import {
   getJson,
   postJson,
   patchJson,
+  putJson,
   delJson,
   serverLogout
 } from "./api";
@@ -234,14 +235,20 @@ export function useGhostData() {
     setSelectedSkillIds(Array.isArray(p?.skillIds) ? (p!.skillIds as string[]) : []);
   }, [selectedProject, projects, loadPlans, loadBuilds]);
 
-  /* ---------------- ingest progress polling ---------------- */
+  /* ---------------- ingest + scan progress polling ---------------- */
   const ingesting = useMemo(
     () => projects.some((p) => String(p.ingestStatus || "") === "ingesting"),
     [projects]
   );
+  // A project-intelligence scan is in flight while its mirrored status is queued
+  // / scanning / analyzing — poll so the card + progress bar update live.
+  const scanning = useMemo(
+    () => projects.some((p) => ["queued", "scanning", "analyzing"].includes(String(p.scanStatus || ""))),
+    [projects]
+  );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    if (!auth || !ingesting) {
+    if (!auth || (!ingesting && !scanning)) {
       if (pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
@@ -258,7 +265,7 @@ export function useGhostData() {
         pollRef.current = null;
       }
     };
-  }, [auth, ingesting, loadProjects, loadDashboard]);
+  }, [auth, ingesting, scanning, loadProjects, loadDashboard]);
 
   /* ---------------- live agent-run progress polling ---------------- */
   // While /agent/run is in flight, poll the run list and lock onto the newest
@@ -495,8 +502,15 @@ export function useGhostData() {
   );
 
   const design = useCallback(
-    async (projectId: string, section: string) =>
-      run("design", () => postJson("/design", { projectId, section: section.trim() || undefined, lang })),
+    async (projectId: string, section: string, topicIds?: string[]) =>
+      run("design", () =>
+        postJson("/design", {
+          projectId,
+          section: section.trim() || undefined,
+          topicIds: topicIds && topicIds.length ? topicIds : undefined,
+          lang
+        })
+      ),
     [run, lang]
   );
 
@@ -569,6 +583,78 @@ export function useGhostData() {
     [run]
   );
 
+  /* ---------------- flow maps (Stage 1) ---------------- */
+  const loadMap = useCallback(
+    async (projectId: string, kind: "design" | "project"): Promise<Json | null> => {
+      try {
+        const r = await getJson(`/projects/${projectId}/map?kind=${kind}`);
+        return (r.map as Json | null) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  const saveMap = useCallback(
+    async (projectId: string, kind: "design" | "project", nodes: Json[], edges: Json[]): Promise<Json> =>
+      putJson(`/projects/${projectId}/map`, { kind, nodes, edges }),
+    []
+  );
+
+  /* ---------------- project intelligence (scan + map) ---------------- */
+  // Enqueue a (read-only) project scan. The heavy analysis runs server-side; we
+  // refresh the project list so the mirrored scanStatus updates the card.
+  const startScan = useCallback(
+    async (projectId: string, options?: { depth?: number; ai?: boolean }) =>
+      run(`scan-${projectId}`, async () => {
+        const r = await postJson(`/projects/${projectId}/scan`, options || {});
+        loadProjects();
+        return r;
+      }),
+    [run, loadProjects]
+  );
+
+  const rescan = useCallback(
+    async (projectId: string, options?: { depth?: number; ai?: boolean }) =>
+      run(`scan-${projectId}`, async () => {
+        const r = await postJson(`/projects/${projectId}/rescan`, options || {});
+        loadProjects();
+        return r;
+      }),
+    [run, loadProjects]
+  );
+
+  const loadScanStatus = useCallback(async (projectId: string): Promise<Json | null> => {
+    try {
+      const r = await getJson(`/projects/${projectId}/scan`);
+      return (r.scan as Json | null) ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const loadIntelMap = useCallback(async (projectId: string): Promise<Json | null> => {
+    try {
+      const r = await getJson(`/projects/${projectId}/scan/map`);
+      return (r.map as Json | null) ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const loadNodeDetail = useCallback(
+    async (projectId: string, nodeId: string): Promise<Json | null> => {
+      try {
+        const r = await getJson(`/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}`);
+        return (r.node as Json | null) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
   return {
     // i18n / prefs
     lang,
@@ -605,6 +691,7 @@ export function useGhostData() {
     plans,
     builds,
     ingesting,
+    scanning,
     // selections
     selectedTopic,
     setSelectedTopic,
@@ -643,7 +730,14 @@ export function useGhostData() {
     build,
     openBuild,
     runAgent,
-    loadAgentRun
+    loadAgentRun,
+    loadMap,
+    saveMap,
+    startScan,
+    rescan,
+    loadScanStatus,
+    loadIntelMap,
+    loadNodeDetail
   };
 }
 

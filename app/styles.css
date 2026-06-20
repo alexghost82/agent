@@ -345,6 +345,65 @@ textarea.url-multi { min-height: 78px; }
 .skill-list p { margin: 0 0 10px; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .skill-ex { display: block; font-size: 12px; color: var(--accent); background: var(--bg); border: 1px solid var(--line-soft); border-radius: 8px; padding: 7px 9px; white-space: pre-wrap; }
 
+/* Skill groups shown as a visual grid of square tiles. Each tile opens a modal
+   listing all skills in that group. */
+.skill-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.skill-cat-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 14px;
+  color: var(--text);
+  background: linear-gradient(155deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color .18s var(--ease), transform .18s var(--ease), box-shadow .18s var(--ease);
+}
+.skill-cat-tile:hover {
+  border-color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+.skill-cat-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.skill-cat-tile-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.skill-cat-tile-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+
+/* The skill list inside the group modal can scroll within the modal body. */
+.skill-modal-body { padding: 18px; overflow: auto; height: 100%; }
+.skill-modal-body .skill-list { margin-bottom: 0; }
+
 /* card title */
 .card-title { font-size: 14px; margin: 0 0 10px; color: var(--text); }
 
@@ -353,7 +412,25 @@ textarea.url-multi { min-height: 78px; }
 .status-ingesting { color: var(--warn); border-color: var(--warn); }
 .status-ready { color: var(--ok); border-color: var(--ok); }
 .status-error { color: var(--danger); border-color: var(--danger); }
-.proj-item { flex-wrap: wrap; }
+/* Project cards stack vertically: the summary reads as a full-width document
+   and the actions sit in an elegant footer below it (not crammed beside it). */
+.proj-item { flex-direction: column; align-items: stretch; gap: 12px; }
+
+.proj-summary { margin-top: 12px; }
+.proj-summary-body { position: relative; }
+.proj-summary-body.clamp {
+  max-height: 9em; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent);
+}
+.proj-summary-body.open { max-height: none; }
+.proj-summary .read-more { margin-top: 8px; }
+
+.proj-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line-soft); padding-top: 12px;
+}
+.proj-footer .row-actions { justify-content: flex-end; }
 
 /* skill picker */
 .skill-pick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 6px; }
@@ -525,3 +602,270 @@ textarea.url-multi { min-height: 78px; }
   .skill-list li:hover, .mini-stats div:hover, .primary:hover,
   .nav-item:hover:not(.is-active) { transform: none; }
 }
+
+/* ---------- Flow map modal + canvas ---------- */
+.map-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(8, 10, 20, 0.62);
+  backdrop-filter: blur(4px);
+  animation: map-modal-fade 0.18s var(--ease-out);
+}
+@keyframes map-modal-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.map-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 94vw);
+  height: 88vh;
+  max-height: 92vh;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.map-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.map-modal-head h3 { margin: 0; font-size: 16px; color: var(--text); }
+.map-modal-head .ghost.sm { font-size: 20px; line-height: 1; padding: 2px 10px; }
+
+.map-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.flowmap-wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.flowmap-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.flowmap-canvas {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* Keep React Flow chrome readable against the theme background. */
+.flowmap-canvas .react-flow__attribution {
+  background: transparent;
+  color: var(--muted);
+}
+.flowmap-canvas .react-flow__controls-button {
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  fill: var(--text);
+}
+.flowmap-canvas .react-flow__minimap {
+  background: var(--bg-soft);
+}
+
+/* ===================== Project Intelligence map ===================== */
+
+/* Typed-node colour tokens (theme-agnostic accents). */
+:root {
+  --nt-project: #8b5cf6;
+  --nt-feature: #22c55e;
+  --nt-module: #38bdf8;
+  --nt-apiRoute: #f59e0b;
+  --nt-service: #06b6d4;
+  --nt-dbModel: #ec4899;
+  --nt-component: #a78bfa;
+  --nt-worker: #f97316;
+  --nt-config: #94a3b8;
+  --nt-test: #84cc16;
+  --nt-documentation: #64748b;
+  --nt-file: #60a5fa;
+  --nt-externalPackage: #eab308;
+  --nt-firebaseFunction: #fbbf24;
+  --nt-firestoreCollection: #f472b6;
+}
+
+/* Scan status pill on the project card. */
+.scan-status {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  color: var(--muted-2);
+}
+.scan-status.scan-completed { color: #22c55e; border-color: #22c55e55; }
+.scan-status.scan-failed { color: var(--warn); border-color: var(--warn); }
+.link-btn {
+  display: inline; padding: 0; margin: 0; border: 0; background: none;
+  color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline;
+}
+.link-btn:hover { color: var(--accent-2); }
+.read-more { margin-left: 6px; }
+.map-status { display: inline-flex; align-items: center; gap: 6px; }
+.map-status.map-ready { color: #22c55e; border-color: #22c55e55; }
+.map-status.map-error { color: var(--warn); border-color: var(--warn); }
+.map-status.map-building, .map-status.map-queued { color: var(--accent-2); border-color: var(--accent-2); }
+.scan-status.scan-scanning,
+.scan-status.scan-analyzing,
+.scan-status.scan-queued { color: var(--accent); border-color: var(--accent); }
+
+/* Widen the shared modal when it hosts the intelligence map. */
+.map-modal:has(.intel-modal-grid) { width: min(1560px, 97vw); }
+
+.intel-modal-grid { display: flex; height: 100%; min-height: 0; }
+
+.intel-map { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.intel-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap;
+}
+.intel-layers { display: flex; flex-wrap: wrap; gap: 6px; }
+.intel-layer-btn {
+  font-size: 12px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--bg-soft); color: var(--muted-2); cursor: pointer;
+}
+.intel-layer-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.intel-search input {
+  font-size: 13px; padding: 5px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); min-width: 200px;
+}
+
+.intel-filters {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.intel-chip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg-soft); color: var(--text); cursor: pointer;
+}
+.intel-chip.off { opacity: 0.4; }
+.intel-chip-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--nt-file); }
+
+.intel-canvas { flex: 1; min-height: 0; position: relative; background: var(--bg); }
+.intel-empty-layer {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--muted-2); font-size: 14px; pointer-events: none;
+}
+
+/* Typed nodes. Border + dot colour keyed by node type. */
+.intel-node {
+  position: relative; min-width: 120px; max-width: 220px;
+  padding: 8px 12px; border-radius: 10px;
+  background: var(--panel); border: 1.5px solid var(--nt-file);
+  border-left-width: 5px; color: var(--text);
+  font-size: 12px; box-shadow: var(--shadow-sm); cursor: pointer;
+}
+.intel-node .intel-node-type { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2); }
+.intel-node .intel-node-label { display: block; font-weight: 600; word-break: break-word; }
+.intel-node.selected { outline: 2px solid var(--accent); }
+.intel-node.risk { border-color: var(--warn); }
+.intel-node.dim { opacity: 0.28; }
+.intel-node.match { box-shadow: 0 0 0 2px var(--accent-2); }
+.intel-node.collapsed { border-style: dashed; }
+.intel-badge {
+  position: absolute; top: -8px; font-size: 9px; font-weight: 700;
+  padding: 1px 5px; border-radius: 999px; color: #fff;
+}
+.intel-badge.inferred { right: 22px; background: #8b5cf6; }
+.intel-badge.inferred.inline { position: static; margin-left: 8px; }
+.intel-badge.risk { right: -6px; background: var(--warn); }
+.intel-caret { position: absolute; right: 8px; bottom: 4px; font-size: 12px; color: var(--muted-2); }
+
+.intel-node.type-project { border-color: var(--nt-project); }
+.intel-node.type-feature { border-color: var(--nt-feature); }
+.intel-node.type-module { border-color: var(--nt-module); }
+.intel-node.type-apiRoute { border-color: var(--nt-apiRoute); }
+.intel-node.type-service { border-color: var(--nt-service); }
+.intel-node.type-dbModel { border-color: var(--nt-dbModel); }
+.intel-node.type-component { border-color: var(--nt-component); }
+.intel-node.type-worker { border-color: var(--nt-worker); }
+.intel-node.type-config { border-color: var(--nt-config); }
+.intel-node.type-test { border-color: var(--nt-test); }
+.intel-node.type-documentation { border-color: var(--nt-documentation); }
+.intel-node.type-file { border-color: var(--nt-file); }
+.intel-node.type-externalPackage { border-color: var(--nt-externalPackage); }
+.intel-node.type-firebaseFunction { border-color: var(--nt-firebaseFunction); }
+.intel-node.type-firestoreCollection { border-color: var(--nt-firestoreCollection); }
+
+/* Filter chips + sidebar pills inherit the same colour per type. */
+.intel-chip.type-project .intel-chip-dot, .intel-pill.type-project { background: var(--nt-project); }
+.intel-chip.type-feature .intel-chip-dot, .intel-pill.type-feature { background: var(--nt-feature); }
+.intel-chip.type-module .intel-chip-dot, .intel-pill.type-module { background: var(--nt-module); }
+.intel-chip.type-apiRoute .intel-chip-dot, .intel-pill.type-apiRoute { background: var(--nt-apiRoute); }
+.intel-chip.type-service .intel-chip-dot, .intel-pill.type-service { background: var(--nt-service); }
+.intel-chip.type-dbModel .intel-chip-dot, .intel-pill.type-dbModel { background: var(--nt-dbModel); }
+.intel-chip.type-component .intel-chip-dot, .intel-pill.type-component { background: var(--nt-component); }
+.intel-chip.type-worker .intel-chip-dot, .intel-pill.type-worker { background: var(--nt-worker); }
+.intel-chip.type-config .intel-chip-dot, .intel-pill.type-config { background: var(--nt-config); }
+.intel-chip.type-test .intel-chip-dot, .intel-pill.type-test { background: var(--nt-test); }
+.intel-chip.type-documentation .intel-chip-dot, .intel-pill.type-documentation { background: var(--nt-documentation); }
+.intel-chip.type-file .intel-chip-dot, .intel-pill.type-file { background: var(--nt-file); }
+.intel-chip.type-externalPackage .intel-chip-dot, .intel-pill.type-externalPackage { background: var(--nt-externalPackage); }
+.intel-chip.type-firebaseFunction .intel-chip-dot, .intel-pill.type-firebaseFunction { background: var(--nt-firebaseFunction); }
+.intel-chip.type-firestoreCollection .intel-chip-dot, .intel-pill.type-firestoreCollection { background: var(--nt-firestoreCollection); }
+
+/* Minimap node tints for the synthesized Firebase node types. */
+.react-flow__minimap-node.mm-firebaseFunction { fill: var(--nt-firebaseFunction); }
+.react-flow__minimap-node.mm-firestoreCollection { fill: var(--nt-firestoreCollection); }
+
+.react-flow__edge.intel-edge .react-flow__edge-path { stroke: var(--line); }
+.react-flow__edge-text { fill: var(--muted-2); font-size: 9px; }
+
+/* Sidebar */
+.intel-sidebar {
+  width: 340px; flex: 0 0 340px; border-left: 1px solid var(--line);
+  background: var(--panel); overflow-y: auto; padding: 14px 16px;
+}
+.intel-sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.intel-sidebar-head h4 { margin: 6px 0 0; font-size: 15px; word-break: break-word; }
+.intel-pill {
+  display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+  color: #fff; padding: 2px 8px; border-radius: 999px;
+}
+.intel-sidebar-body section { margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.intel-sidebar-body h5 { margin: 0 0 8px; font-size: 12px; color: var(--muted-2); text-transform: uppercase; letter-spacing: .03em; }
+.intel-desc { font-size: 13px; line-height: 1.5; }
+.intel-touch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.intel-touch-grid div { background: var(--bg-soft); border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 8px; }
+.intel-touch-grid b { display: block; font-size: 11px; color: var(--muted-2); font-weight: 500; }
+.intel-touch-grid span { font-size: 18px; font-weight: 700; }
+.intel-file-list, .intel-rel-list, .intel-risk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.intel-file-list code { font-size: 11px; color: var(--muted); word-break: break-all; }
+.intel-rel { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--bg-soft); border: 1px solid var(--line-soft); border-radius: 7px; padding: 5px 8px; cursor: pointer; color: var(--text); }
+.intel-rel:hover { border-color: var(--accent); }
+.intel-rel-dir { color: var(--accent-2); font-weight: 700; }
+.intel-rel-edge { font-size: 10px; color: var(--muted-2); text-transform: uppercase; }
+.intel-rel-label { font-size: 12px; font-weight: 600; word-break: break-word; }
+.intel-risk-list li { background: var(--bg-soft); border: 1px solid var(--line-soft); border-left: 4px solid var(--muted-2); border-radius: 7px; padding: 6px 9px; display: flex; flex-direction: column; gap: 2px; }
+.intel-risk-list li b { font-size: 12px; }
+.intel-risk-list li span { font-size: 12px; color: var(--muted); }
+.intel-risk-list li.sev-warning { border-left-color: var(--warn); }
+.intel-risk-list li.sev-critical { border-left-color: #ef4444; }
+.intel-meta { margin: 0; font-size: 12px; }
+.intel-meta div { display: flex; gap: 8px; padding: 2px 0; }
+.intel-meta dt { color: var(--muted-2); min-width: 80px; }
+.intel-meta dd { margin: 0; word-break: break-all; }
+
+.intel-state { padding: 28px; display: flex; flex-direction: column; gap: 12px; align-items: stretch; max-width: 520px; margin: 0 auto; }
+.intel-state.error p { color: var(--warn); }

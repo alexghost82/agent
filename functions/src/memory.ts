@@ -167,9 +167,9 @@ export function mergeContext(
 }
 
 // Retrieve and merge context for one or more subqueries (Epic 2.1). Runs each
-// subquery through `searchMemory` (in parallel), then merges/ranks/budgets the
-// union via `mergeContext`. Summary chunks float to the top; output is bounded
-// by `maxChunks` and `charBudget`.
+// subquery through `searchMemory` (sequentially, to bound peak memory), then
+// merges/ranks/budgets the union via `mergeContext`. Summary chunks float to the
+// top; output is bounded by `maxChunks` and `charBudget`.
 export async function gatherContext(
   queries: string[] | string,
   scope: SearchScope,
@@ -181,6 +181,17 @@ export async function gatherContext(
   if (!list.length) return [];
 
   const perQuery = opts?.perQuery ?? 8;
-  const batches = await Promise.all(list.map((q) => searchMemory(q, scope, perQuery)));
+  // Run subqueries SEQUENTIALLY, not with Promise.all. The in-memory backend
+  // loads every candidate chunk (each with a large embedding vector) into memory
+  // to score it; running all subqueries in parallel keeps N candidate sets alive
+  // at once and caused OOM crashes (JS heap exhausted) on bigger topics. Doing
+  // them one at a time keeps only a single candidate set live, so each is GC'd
+  // before the next — peak memory drops ~Nx for a small latency cost. Each
+  // searchMemory only returns its top `perQuery` scored chunks, so the merged
+  // result is unchanged.
+  const batches: ScoredChunk[][] = [];
+  for (const q of list) {
+    batches.push(await searchMemory(q, scope, perQuery));
+  }
   return mergeContext(batches.flat(), { maxChunks: opts?.maxChunks, charBudget: opts?.charBudget });
 }

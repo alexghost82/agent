@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { GhostData } from "../../useGhostData";
 import { Json } from "../../api";
 import { downloadZip } from "../../zip";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
-import { Pagination, usePaged } from "../Pagination";
+import { MapModal } from "../MapModal";
 
 export function SkillsPanel({ g }: { g: GhostData }) {
   const { t, topics, skills, selectedTopic, setSelectedTopic, loading, output, stats } = g;
@@ -16,7 +16,43 @@ export function SkillsPanel({ g }: { g: GhostData }) {
   const [editDesc, setEditDesc] = useState("");
   const [editExample, setEditExample] = useState("");
 
-  const { page, setPage, pageCount, visible } = usePaged(skills, 8);
+  // Which skill group's modal is currently open (by categoryId), if any.
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+
+  // Group skills by their topic (category). Skills without a known topicId fall
+  // under the "Uncategorized" group, which is always ordered last.
+  const groups = useMemo(() => {
+    const NO_CAT = "\u0000__none__";
+    const map = new Map<string, { categoryId: string; categoryName: string; skills: Json[] }>();
+    for (const s of skills) {
+      const topic = topics.find((tp) => String(tp.id) === String(s.topicId));
+      const categoryId = topic ? String(topic.id) : NO_CAT;
+      const categoryName = topic ? String(topic.name) : t.noCategory;
+      let group = map.get(categoryId);
+      if (!group) {
+        group = { categoryId, categoryName, skills: [] };
+        map.set(categoryId, group);
+      }
+      group.skills.push(s);
+    }
+    return [...map.values()].sort((a, b) => {
+      if (a.categoryId === NO_CAT) return 1;
+      if (b.categoryId === NO_CAT) return -1;
+      return a.categoryName.localeCompare(b.categoryName);
+    });
+  }, [skills, topics, t.noCategory]);
+
+  // The group whose modal is open. Falls back to null if it no longer exists
+  // (e.g. all of its skills were deleted while the modal was open).
+  const openGroup = useMemo(
+    () => groups.find((grp) => grp.categoryId === openGroupId) ?? null,
+    [groups, openGroupId]
+  );
+
+  function closeGroup() {
+    setOpenGroupId(null);
+    setEditId(null);
+  }
 
   function startEdit(s: Json) {
     setEditId(String(s.id));
@@ -31,6 +67,61 @@ export function SkillsPanel({ g }: { g: GhostData }) {
       example: editExample.trim() || undefined
     });
     setEditId(null);
+  }
+
+  function renderSkill(s: Json) {
+    const id = String(s.id);
+    const delKey = `del-skill-${id}`;
+    const editKey = `edit-skill-${id}`;
+    if (editId === id) {
+      return (
+        <li key={id}>
+          <label>{t.skillNameLabel}</label>
+          <input value={editName} onChange={(e) => setEditName(e.target.value)} />
+          <label>{t.descLabel}</label>
+          <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
+          <label>{t.exampleLabel}</label>
+          <input value={editExample} onChange={(e) => setEditExample(e.target.value)} />
+          <div className="row-actions" style={{ marginTop: 12 }}>
+            <button className="primary sm-primary" onClick={() => saveEdit(id)} disabled={!!loading[editKey] || editName.trim().length < 2}>
+              {loading[editKey] ? t.saving : t.save}
+            </button>
+            <button className="ghost sm" onClick={() => setEditId(null)}>
+              {t.cancel}
+            </button>
+          </div>
+        </li>
+      );
+    }
+    return (
+      <li key={id}>
+        <div className="skill-head">
+          <b>{String(s.skillName)}</b>
+          {s.source === "learned" ? <span className="tag">{t.learnedTag}</span> : null}
+        </div>
+        <p>{String(s.description)}</p>
+        {s.example ? (
+          <code className="skill-ex">
+            {t.exampleLabel}: {String(s.example)}
+          </code>
+        ) : null}
+        <div className="row-actions" style={{ marginTop: 10 }}>
+          <button className="ghost sm" onClick={() => startEdit(s)}>
+            <Icon name="edit" /> {t.edit}
+          </button>
+          <button
+            className="ghost sm danger-btn"
+            onClick={() => {
+              if (confirm(t.confirmDelete)) g.deleteSkill(id);
+            }}
+            disabled={!!loading[delKey]}
+            aria-label={t.delete}
+          >
+            <Icon name="trash" /> {loading[delKey] ? t.deleting : t.delete}
+          </button>
+        </div>
+      </li>
+    );
   }
 
   // Export the agent's learned skills (and the currently available knowledge
@@ -101,68 +192,35 @@ export function SkillsPanel({ g }: { g: GhostData }) {
         </div>
       </div>
       {skills.length ? (
-        <>
-          <ul className="skill-list">
-            {visible.map((s) => {
-              const id = String(s.id);
-              const delKey = `del-skill-${id}`;
-              const editKey = `edit-skill-${id}`;
-              if (editId === id) {
-                return (
-                  <li key={id}>
-                    <label>{t.skillNameLabel}</label>
-                    <input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                    <label>{t.descLabel}</label>
-                    <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
-                    <label>{t.exampleLabel}</label>
-                    <input value={editExample} onChange={(e) => setEditExample(e.target.value)} />
-                    <div className="row-actions" style={{ marginTop: 12 }}>
-                      <button className="primary sm-primary" onClick={() => saveEdit(id)} disabled={!!loading[editKey] || editName.trim().length < 2}>
-                        {loading[editKey] ? t.saving : t.save}
-                      </button>
-                      <button className="ghost sm" onClick={() => setEditId(null)}>
-                        {t.cancel}
-                      </button>
-                    </div>
-                  </li>
-                );
-              }
-              return (
-                <li key={id}>
-                  <div className="skill-head">
-                    <b>{String(s.skillName)}</b>
-                    {s.source === "learned" ? <span className="tag">{t.learnedTag}</span> : null}
-                  </div>
-                  <p>{String(s.description)}</p>
-                  {s.example ? (
-                    <code className="skill-ex">
-                      {t.exampleLabel}: {String(s.example)}
-                    </code>
-                  ) : null}
-                  <div className="row-actions" style={{ marginTop: 10 }}>
-                    <button className="ghost sm" onClick={() => startEdit(s)}>
-                      <Icon name="edit" /> {t.edit}
-                    </button>
-                    <button
-                      className="ghost sm danger-btn"
-                      onClick={() => {
-                        if (confirm(t.confirmDelete)) g.deleteSkill(id);
-                      }}
-                      disabled={!!loading[delKey]}
-                      aria-label={t.delete}
-                    >
-                      <Icon name="trash" /> {loading[delKey] ? t.deleting : t.delete}
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          <Pagination page={page} pageCount={pageCount} setPage={setPage} t={t} />
-        </>
+        <div className="skill-cat-grid" aria-label={t.skillCategories}>
+          {groups.map((group) => (
+            <button
+              key={group.categoryId}
+              type="button"
+              className="skill-cat-tile"
+              onClick={() => setOpenGroupId(group.categoryId)}
+              aria-label={`${group.categoryName} (${group.skills.length})`}
+            >
+              <span className="skill-cat-tile-name">{group.categoryName}</span>
+              <span className="skill-cat-tile-count">{group.skills.length}</span>
+            </button>
+          ))}
+        </div>
       ) : (
         <p className="muted">{t.noSkills}</p>
       )}
+      <MapModal
+        open={!!openGroup}
+        title={openGroup ? `${openGroup.categoryName} (${openGroup.skills.length})` : ""}
+        onClose={closeGroup}
+        closeLabel={t.closeMap}
+      >
+        {openGroup ? (
+          <div className="skill-modal-body">
+            <ul className="skill-list">{openGroup.skills.map((s) => renderSkill(s))}</ul>
+          </div>
+        ) : null}
+      </MapModal>
       <ResultView k="skills" output={output} loading={loading} t={t} />
     </section>
   );

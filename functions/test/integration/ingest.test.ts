@@ -148,6 +148,36 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: async ingest", () => {
     expect(data.ingestStatus).toBe("queued");
   });
 
+  it("surfaces a clear error (not a silent drop) when a stored GitHub token cannot be decrypted", async () => {
+    // A token saved under a now-rotated KEYS_ENC_SECRET decrypts to garbage and
+    // throws. Regression guard: the job must mark the project errored with an
+    // actionable message and must NOT run ingest unauthenticated.
+    const user = await seedUser({
+      githubToken: { ciphertext: "00".repeat(16), iv: "00".repeat(12), tag: "11".repeat(16) }
+    });
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "Bad token proj",
+      description: "p",
+      ingestStatus: "queued",
+      ingestToken: "tok-1"
+    });
+
+    let calls = 0;
+    const fakeIngest = async (): Promise<IngestResult> => {
+      calls += 1;
+      return { branch: "main", filesIndexed: 1, chunks: 1, summary: "x" };
+    };
+
+    const payload: IngestPayload = { userId: user.userId, projectId, repoUrl: "https://github.com/acme/widget", ingestToken: "tok-1" };
+    await runIngestJob(payload, fakeIngest as never);
+
+    expect(calls).toBe(0); // never ran unauthenticated
+    const data = (await db.collection("projects").doc(projectId).get()).data()!;
+    expect(data.ingestStatus).toBe("error");
+    expect(String(data.ingestError)).toMatch(/token/i);
+  });
+
   it("re-running the same token is idempotent (no error, finalizes again)", async () => {
     const user = await seedUser();
     const projectId = await addDoc("projects", {

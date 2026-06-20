@@ -43,7 +43,14 @@ function dispatchMode(): "tasks" | "inline" | "noop" {
 
 // Reads the per-user GitHub token, decrypting the stored envelope. Supports a
 // legacy plaintext value for backward compatibility during migration.
-function readGithubToken(data: FirebaseFirestore.DocumentData | undefined, userId: string): string | undefined {
+//
+// IMPORTANT: a token that is STORED but cannot be decrypted (e.g. KEYS_ENC_SECRET
+// was rotated since it was saved) is NOT silently dropped — that produced the
+// confusing "my valid token doesn't work" symptom, because ingest then ran
+// unauthenticated and a private repo 404'd. Instead we throw a permanent,
+// user-actionable error so the project surfaces "re-save your token". When NO
+// token is stored we still return undefined so public-repo ingest keeps working.
+export function readGithubToken(data: FirebaseFirestore.DocumentData | undefined, userId: string): string | undefined {
   const t = data?.githubToken;
   if (!t) return undefined;
   if (typeof t === "string") return t; // legacy plaintext (pre-encryption)
@@ -53,7 +60,11 @@ function readGithubToken(data: FirebaseFirestore.DocumentData | undefined, userI
       return decryptSecret(env as EncryptedSecret);
     } catch {
       log("warn", "github_token_decrypt_failed", { userId });
-      return undefined;
+      throw new AppError(
+        "github_token_invalid",
+        400,
+        "Saved GitHub token could not be decrypted (the server encryption secret changed). Re-enter your token and try again."
+      );
     }
   }
   return undefined;
@@ -61,8 +72,13 @@ function readGithubToken(data: FirebaseFirestore.DocumentData | undefined, userI
 
 // GitHub errors that will never succeed on retry (bad repo / no access). For
 // these we record the failure but do NOT rethrow, so Cloud Tasks stops retrying.
-function isPermanent(err: unknown): boolean {
-  return err instanceof AppError && (err.code === "github_repo_unavailable" || err.code === "github_access_denied");
+export function isPermanent(err: unknown): boolean {
+  return (
+    err instanceof AppError &&
+    (err.code === "github_repo_unavailable" ||
+      err.code === "github_access_denied" ||
+      err.code === "github_token_invalid")
+  );
 }
 
 // The actual ingest job. Exported (with an injectable `ingest` fn) so it can be

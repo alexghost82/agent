@@ -4,54 +4,12 @@ import { serverTime } from "./util";
 import { chunkText, isTextFile, parseRepoUrl } from "./pure";
 import { mapWithConcurrency } from "./concurrency";
 import { log } from "./log";
-import { AppError } from "./errors";
+import { MAX_FILE_BYTES, getRepoInfo, fetchTree, fetchRawFile } from "./githubFetch";
 
-const GITHUB_API = "https://api.github.com";
 const MAX_FILES = 200;
-const MAX_FILE_BYTES = 100_000;
 const FETCH_CONCURRENCY = Number(process.env.GITHUB_FETCH_CONCURRENCY) || 8;
 const EMBED_BATCH = Number(process.env.EMBED_BATCH_SIZE) || 96;
 const WRITE_BATCH = 400;
-
-function headers(token?: string): Record<string, string> {
-  const h: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "GHOST-Agent-Builder/1.0 (read-only)",
-    "X-GitHub-Api-Version": "2022-11-28"
-  };
-  if (token) h.Authorization = `Bearer ${token}`;
-  return h;
-}
-
-// All requests below are HTTP GET only. The agent never writes to the user's repo.
-async function ghGet(path: string, token?: string): Promise<any> {
-  const res = await fetch(`${GITHUB_API}${path}`, { method: "GET", headers: headers(token) });
-  if (res.status === 404) {
-    throw new AppError("github_repo_unavailable", 400, "Repository not found or no access (check token for private repos)");
-  }
-  if (res.status === 401 || res.status === 403) {
-    throw new AppError("github_access_denied", 403, "GitHub access denied (invalid or missing token)");
-  }
-  if (!res.ok) throw new AppError("github_api_error", 502, `GitHub API error ${res.status}`);
-  return res.json();
-}
-
-async function fetchRawFile(
-  owner: string,
-  repo: string,
-  ref: string,
-  path: string,
-  token?: string
-): Promise<string | null> {
-  const encoded = path.split("/").map(encodeURIComponent).join("/");
-  const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`, {
-    method: "GET",
-    headers: { ...headers(token), Accept: "application/vnd.github.raw" }
-  });
-  if (!res.ok) return null;
-  const text = await res.text();
-  return text.slice(0, MAX_FILE_BYTES);
-}
 
 export interface IngestResult {
   branch: string;
@@ -68,12 +26,13 @@ export async function ingestRepo(opts: {
   onProgress?: (done: number, total: number) => Promise<void>;
 }): Promise<IngestResult> {
   const { owner, repo } = parseRepoUrl(opts.repoUrl);
-  const repoInfo = await ghGet(`/repos/${owner}/${repo}`, opts.token);
+  const repoInfo = await getRepoInfo(owner, repo, opts.token);
   const branch: string = repoInfo.default_branch || "main";
 
-  const tree = await ghGet(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, opts.token);
-  const blobs: { path: string; size: number }[] = (tree.tree || [])
-    .filter((n: any) => n.type === "blob" && isTextFile(n.path) && (n.size ?? 0) <= MAX_FILE_BYTES)
+  const tree = await fetchTree(owner, repo, branch, opts.token);
+  const blobs: { path: string; size: number }[] = tree
+    .filter((n) => n.type === "blob" && isTextFile(n.path) && (n.size ?? 0) <= MAX_FILE_BYTES)
+    .map((n) => ({ path: n.path, size: n.size ?? 0 }))
     .slice(0, MAX_FILES);
 
   // Remove any previously indexed chunks for this project (re-ingest is idempotent).

@@ -6,6 +6,11 @@ import { Json } from "../../api";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
+import { FlowMap } from "../FlowMap";
+import { MapModal } from "../MapModal";
+import { ProjectMapModal } from "../ProjectMapModal";
+import { seedFlow } from "../../flowSeed";
+import { Markdown } from "../../markdown";
 
 function IngestProgress({ p, t }: { p: Json; t: any }) {
   const done = Number(p.ingestedFiles ?? 0);
@@ -46,7 +51,51 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
 
   const [skillSearch, setSkillSearch] = useState("");
 
+  const [mapProjectId, setMapProjectId] = useState<string | null>(null);
+  const [mapNodes, setMapNodes] = useState<any[]>([]);
+  const [mapEdges, setMapEdges] = useState<any[]>([]);
+  const [mapSaving, setMapSaving] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Project Intelligence map (scan-driven). Independent of the manual flow map.
+  const [intelProject, setIntelProject] = useState<{ id: string; name: string } | null>(null);
+
+  // Which project summaries are expanded (per project id).
+  const [openSummaries, setOpenSummaries] = useState<Set<string>>(new Set());
+  const toggleSummary = (id: string) =>
+    setOpenSummaries((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   const { page, setPage, pageCount, visible } = usePaged(projects, 6);
+
+  async function openMap(p: Json) {
+    const id = String(p.id);
+    setMapReady(false);
+    setMapProjectId(id);
+    const saved = await g.loadMap(id, "project");
+    if (saved && Array.isArray(saved.nodes) && saved.nodes.length) {
+      setMapNodes(saved.nodes as any[]);
+      setMapEdges(Array.isArray(saved.edges) ? (saved.edges as any[]) : []);
+      setMapReady(true);
+      return;
+    }
+    const projSkills = g.skills.filter((s) =>
+      Array.isArray(p.skillIds) ? (p.skillIds as string[]).includes(String(s.id)) : false
+    );
+    const { nodes, edges } = seedFlow("project", {
+      name: p.name,
+      stack: p.stack,
+      description: p.description,
+      skills: projSkills
+    });
+    setMapNodes(nodes);
+    setMapEdges(edges);
+    setMapReady(true);
+  }
 
   async function createProject() {
     await g.createProject({
@@ -185,6 +234,8 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
               const editKey = `edit-project-${id}`;
               const ghError = ghOutput?.error ? String(ghOutput.error) : "";
               const ghRequestId = ghOutput?.requestId ? String(ghOutput.requestId) : "";
+              const mapStatus = String(p.mapStatus || "none");
+              const mapBuilding = ["queued", "building"].includes(mapStatus);
 
               if (editId === id) {
                 return (
@@ -224,7 +275,18 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
                     <span>
                       {repoUrl || "\u2014"} {"\u00b7"} {Number(p.ingestedFiles ?? 0)} {t.filesIndexed}
                     </span>
-                    {p.summary ? <p className="appr-review">{String(p.summary).slice(0, 320)}{"\u2026"}</p> : null}
+                    {p.summary ? (
+                      <div className="proj-summary">
+                        <div className={`proj-summary-body ${openSummaries.has(id) ? "open" : "clamp"}`}>
+                          <Markdown>{String(p.summary)}</Markdown>
+                        </div>
+                        {String(p.summary).length > 320 ? (
+                          <button type="button" className="link-btn read-more" onClick={() => toggleSummary(id)}>
+                            {openSummaries.has(id) ? t.showLess || "Show less" : t.readMore || "Read more"}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {ghError ? (
                       <p className="appr-review inline-error">
                         <strong>{t.errorWord}:</strong> {(t.errorCodes && t.errorCodes[ghError]) || ghError}
@@ -236,15 +298,57 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
                       </p>
                     ) : null}
                     {status === "ingesting" ? <IngestProgress p={p} t={t} /> : null}
+                    {status === "error" && p.ingestError ? (
+                      <p className="appr-review inline-error">
+                        <strong>{t.errorWord}:</strong> {String(p.ingestError)}
+                      </p>
+                    ) : null}
+                    {mapStatus !== "none" ? (
+                      <span className={`scan-status map-status map-${mapStatus}`}>
+                        {mapBuilding ? <span className="spinner" /> : null}
+                        {t.mapStatus || "Map"}:{" "}
+                        {mapStatus === "ready"
+                          ? `${t.mapReady || "ready"} \u00b7 ${Number(p.mapNodeCount ?? 0)} ${t.nodes || "nodes"} \u00b7 ${Number(p.mapEdgeCount ?? 0)} ${t.edges || "edges"}`
+                          : mapStatus === "error"
+                            ? t.mapError || "error"
+                            : t.mapBuilding || "building\u2026"}
+                      </span>
+                    ) : null}
+                    {mapStatus === "error" && p.mapError ? (
+                      <p className="appr-review inline-error">
+                        <strong>{t.errorWord}:</strong> {String(p.mapError)}
+                      </p>
+                    ) : null}
                   </div>
-                  <span className={`status status-${status}`}>{t[`ingest_${status}`] || status}</span>
-                  <div className="row-actions">
+                  <div className="proj-footer">
+                    <span className={`status status-${status}`}>{t[`ingest_${status}`] || status}</span>
+                    <div className="row-actions">
                     <button
                       className="ghost sm"
                       onClick={() => g.connectGithub(id, repoUrl)}
                       disabled={!repoUrl || !!loading[ghKey]}
                     >
                       <Icon name="github" /> {loading[ghKey] ? t.connecting : t.connectGithub}
+                    </button>
+                    <button
+                      className="ghost sm"
+                      onClick={() => g.startScan(id, { ai: false })}
+                      disabled={!repoUrl || !!loading[`scan-${id}`] || mapBuilding || ["queued", "scanning", "analyzing"].includes(String(p.scanStatus || ""))}
+                      title={!repoUrl ? t.scanMapHint || t.scanNeedsRepo || "Connect a repository first" : undefined}
+                      aria-label={t.buildMap || "Build map"}
+                    >
+                      <Icon name="search" /> {mapBuilding ? t.mapBuilding || "Building\u2026" : mapStatus === "ready" ? t.rescanBtn || "Rebuild map" : t.buildMap || "Build map"}
+                    </button>
+                    <button
+                      className="ghost sm"
+                      onClick={() => setIntelProject({ id, name: String(p.name) })}
+                      disabled={!repoUrl}
+                      aria-label={t.openMap || "Open map"}
+                    >
+                      <Icon name="overview" /> {t.openMap || "Open map"}
+                    </button>
+                    <button className="ghost sm" onClick={() => openMap(p)} aria-label={t.mapBtn}>
+                      <Icon name="plan" /> {t.mapBtn}
                     </button>
                     <button className="ghost sm" onClick={() => startEdit(p)} aria-label={t.edit}>
                       <Icon name="edit" /> {t.edit}
@@ -259,6 +363,7 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
                     >
                       <Icon name="trash" />
                     </button>
+                    </div>
                   </div>
                 </li>
               );
@@ -334,6 +439,39 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
         ) : null}
       </div>
       <ResultView k="projectCreate" output={output} loading={loading} t={t} />
+
+      <MapModal
+        open={!!mapProjectId}
+        title={t.projectMapTitle}
+        onClose={() => setMapProjectId(null)}
+        closeLabel={t.closeMap}
+      >
+        {mapReady && mapProjectId ? (
+          <FlowMap
+            initialNodes={mapNodes as any}
+            initialEdges={mapEdges as any}
+            t={t}
+            saving={mapSaving}
+            onSave={async (nodes, edges) => {
+              setMapSaving(true);
+              try {
+                await g.saveMap(mapProjectId, "project", nodes as any, edges as any);
+              } finally {
+                setMapSaving(false);
+              }
+            }}
+          />
+        ) : null}
+      </MapModal>
+
+      {intelProject ? (
+        <ProjectMapModal
+          g={g}
+          projectId={intelProject.id}
+          projectName={intelProject.name}
+          onClose={() => setIntelProject(null)}
+        />
+      ) : null}
     </section>
   );
 }

@@ -14,6 +14,7 @@ export type ErrorCode =
   | "no_api_key"
   | "github_repo_unavailable"
   | "github_access_denied"
+  | "github_token_invalid"
   | "github_api_error"
   | "bad_request"
   | "internal";

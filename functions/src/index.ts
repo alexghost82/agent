@@ -108,14 +108,21 @@ app.use((err: unknown, req: AuthedRequest, res: Response, _next: NextFunction) =
 
 // In-process vector search loads many embedding vectors into memory per request,
 // so the default 256 MiB / 80-concurrency config could exceed memory under load
-// (observed: "Memory limit of 256 MiB exceeded"). Give the function more memory,
-// cap per-instance concurrency, and allow longer LLM calls. Behaviour/routes are
-// unchanged — this only adjusts runtime resources.
+// (observed: "Memory limit of 256 MiB exceeded", and later a JS-heap OOM crash —
+// "Reached heap limit" / SIGABRT — during topic skill extraction). gatherContext
+// now runs its subqueries sequentially to cut peak memory; on top of that we give
+// the function 2 GiB and keep per-instance concurrency low so two heavy retrieval
+// requests can't stack into an OOM on the same instance. Allow longer LLM calls.
+// Behaviour/routes are unchanged — this only adjusts runtime resources.
 export const api = onRequest(
-  { memory: "1GiB", timeoutSeconds: 120, concurrency: 20 },
+  { memory: "2GiB", timeoutSeconds: 120, concurrency: 8 },
   app
 );
 
 // Async repo ingestion worker (ADR-0002). Cloud Tasks invokes this out-of-band;
 // `connect-github` only enqueues. Defined in its own module to keep index lean.
 export { ingestWorker } from "./tasks";
+
+// Async project-intelligence scan worker. `/projects/:id/scan` only enqueues;
+// the heavy structure/dependency analysis runs here out of band with retries.
+export { scanWorker } from "./projectScan";
