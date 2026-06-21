@@ -171,18 +171,55 @@ export interface IntelEdge {
   layers: LayerId[];
 }
 
+// A risk surfaced on the map (derived from an Insight). Kept human-readable so
+// it can be exported to Markdown directly.
+export interface MapRisk {
+  id: string;
+  title: string;
+  severity: Insight["severity"];
+  detail: string;
+  files?: string[];
+  nodeIds?: string[];
+}
+
+// A resolved third-party dependency (external package) used by the project.
+export interface MapDependency {
+  name: string;
+  category?: TechCategory;
+  version?: string;
+  confidence?: Confidence;
+  usedBy?: number;
+}
+
+// A collapsible grouping (feature or module) referenced by member nodes.
+export interface MapGroup {
+  id: string;
+  label: string;
+  layer?: LayerId;
+  nodeIds: string[];
+}
+
 // The graph payload served to the client (light per-node data; full per-node
 // detail is fetched lazily via GET /projects/:id/nodes/:nodeId).
+//
+// The enrichment fields (summary, fileIndex, risks, dependencies, groups) are
+// OPTIONAL so a graph persisted by an older scan still satisfies the type and
+// renders client-side without the new sections.
 export interface MapPayload {
   scanId: string;
   status: ScanStatus;
   generatedAt?: number;
+  summary?: string | null;
   nodes: IntelNode[];
   edges: IntelEdge[];
   technologies: Technology[];
   features: Feature[];
   insights: Insight[];
-  stats: { files: number; nodes: number; edges: number };
+  dependencies?: MapDependency[];
+  risks?: MapRisk[];
+  groups?: MapGroup[];
+  fileIndex?: FileIndexEntry[];
+  stats: { files: number; nodes: number; edges: number; risks?: number; technologies?: number };
 }
 
 /* -------------------------------------------------------------------------- */

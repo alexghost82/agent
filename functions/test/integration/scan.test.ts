@@ -137,6 +137,49 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: project scan", () => {
     expect(nodes.empty).toBe(false);
   });
 
+  it("GET /scan/map returns an enriched payload including fileIndex", async () => {
+    const user = await seedUser();
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "Map proj",
+      description: "p",
+      repoUrl: "https://github.com/acme/widget",
+      scanToken: "tok-map"
+    });
+    const scanId = await addDoc("project_scans", {
+      userId: user.userId,
+      projectId,
+      status: "pending",
+      scanToken: "tok-map"
+    });
+    await runScanJob(
+      { userId: user.userId, projectId, scanId, repoUrl: "https://github.com/acme/widget", scanToken: "tok-map", options: { ai: false } },
+      { scan: (async () => fakeScanResult()) as never }
+    );
+
+    const res = await srv.request("GET", `/projects/${projectId}/scan/map`, { token: user.token });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.map.fileIndex)).toBe(true);
+    expect(res.body.map.fileIndex.length).toBeGreaterThan(0);
+    expect(res.body.map.stats.files).toBeGreaterThan(0);
+    // Enrichment fields are present (even if empty) so the client can rely on them.
+    expect(Array.isArray(res.body.map.risks)).toBe(true);
+    expect(Array.isArray(res.body.map.dependencies)).toBe(true);
+  });
+
+  it("GET /scan/map denies access to another user's project (404)", async () => {
+    const owner = await seedUser();
+    const other = await seedUser();
+    const projectId = await addDoc("projects", {
+      userId: owner.userId,
+      name: "Owned",
+      description: "p",
+      repoUrl: "https://github.com/acme/widget"
+    });
+    const res = await srv.request("GET", `/projects/${projectId}/scan/map`, { token: other.token });
+    expectError(res, 404, "not_found");
+  });
+
   it("drops a superseded (stale token) scan without running it", async () => {
     const user = await seedUser();
     const projectId = await addDoc("projects", {

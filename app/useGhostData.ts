@@ -47,6 +47,11 @@ export function useGhostData() {
   const [selectedProject, setSelectedProject] = useState("");
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
 
+  // Design Map (per-project graph editor). Distinct from the flow_maps handled
+  // by loadMap/saveMap above — these are keyed by projectId.
+  const [designMaps, setDesignMaps] = useState<Record<string, Json>>({});
+  const [selectedDesignMapProject, setSelectedDesignMapProject] = useState("");
+
   const t = DICT[lang];
   const rtl = lang === "he";
 
@@ -602,6 +607,66 @@ export function useGhostData() {
     []
   );
 
+  /* ---------------- design map (per-project graph editor) ---------------- */
+  const loadDesignMap = useCallback(async (projectId: string): Promise<Json | null> => {
+    try {
+      const r = await getJson(`/projects/${projectId}/design-map`);
+      const map = (r.map as Json | null) ?? null;
+      if (map) setDesignMaps((m) => ({ ...m, [projectId]: map }));
+      return map;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const saveDesignMap = useCallback(
+    async (projectId: string, map: { nodes: unknown[]; edges: unknown[] }): Promise<Json> => {
+      const r = await postJson(`/projects/${projectId}/design-map`, {
+        nodes: map.nodes,
+        edges: map.edges
+      });
+      if (r.map) setDesignMaps((m) => ({ ...m, [projectId]: r.map as Json }));
+      return r;
+    },
+    []
+  );
+
+  const patchDesignMap = useCallback(
+    async (projectId: string, patch: { nodes?: unknown[]; edges?: unknown[] }): Promise<Json> => {
+      const r = await patchJson(`/projects/${projectId}/design-map`, patch);
+      if (r.map) setDesignMaps((m) => ({ ...m, [projectId]: r.map as Json }));
+      return r;
+    },
+    []
+  );
+
+  const addSkillToDesignMap = useCallback(
+    async (projectId: string, skillId: string, position?: { x: number; y: number }): Promise<Json> => {
+      const r = await postJson(`/projects/${projectId}/design-map/add-skill`, { skillId, position });
+      if (r.map) setDesignMaps((m) => ({ ...m, [projectId]: r.map as Json }));
+      return r;
+    },
+    []
+  );
+
+  const addPodskillToDesignMap = useCallback(
+    async (
+      projectId: string,
+      skillId: string,
+      podskillId: string,
+      position?: { x: number; y: number }
+    ): Promise<Json> => {
+      const r = await postJson(`/projects/${projectId}/design-map/add-podskill`, {
+        skillId,
+        podskillId,
+        position
+      });
+      if (r.map) setDesignMaps((m) => ({ ...m, [projectId]: r.map as Json }));
+      return r;
+    },
+    []
+  );
+
   /* ---------------- project intelligence (scan + map) ---------------- */
   // Enqueue a (read-only) project scan. The heavy analysis runs server-side; we
   // refresh the project list so the mirrored scanStatus updates the card.
@@ -733,6 +798,15 @@ export function useGhostData() {
     loadAgentRun,
     loadMap,
     saveMap,
+    // design map
+    designMaps,
+    selectedDesignMapProject,
+    setSelectedDesignMapProject,
+    loadDesignMap,
+    saveDesignMap,
+    patchDesignMap,
+    addSkillToDesignMap,
+    addPodskillToDesignMap,
     startScan,
     rescan,
     loadScanStatus,

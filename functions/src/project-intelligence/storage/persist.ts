@@ -4,13 +4,17 @@ import { tsMillis } from "../../pure";
 import type {
   ScanStatus,
   ScanOptions,
+  NodeType,
   IntelNode,
   IntelEdge,
   Technology,
   Feature,
   Insight,
   FileIndexEntry,
-  MapPayload
+  MapPayload,
+  MapRisk,
+  MapDependency,
+  MapGroup
 } from "../types";
 
 // Firestore collections for the project-intelligence feature. Every doc is
@@ -144,6 +148,85 @@ interface RelatedRef {
   direction: "out" | "in";
 }
 
+// Caps for the synthesized per-node `details` block so a huge/god node can't
+// blow up the doc size or the exported Markdown.
+const DETAIL_TEXT_CAP = 600;
+const DETAIL_LIST_CAP = 40;
+const DETAIL_FILE_CAP = 60;
+
+function clampText(s: string, cap = DETAIL_TEXT_CAP): string {
+  if (s.length <= cap) return s;
+  return `${s.slice(0, cap - 1)}\u2026`;
+}
+
+// One-line "what this node does" hint keyed off the node type. Deterministic and
+// transport-friendly so it can be exported without further processing.
+function logicForType(type: NodeType): string {
+  const map: Partial<Record<NodeType, string>> = {
+    project: "Root of the project graph; owns features and top-level functions.",
+    feature: "Groups the files that implement one product capability.",
+    module: "A directory-level grouping of related source files.",
+    apiRoute: "Handles an inbound request and returns a response.",
+    firebaseFunction: "Deployed Cloud Function entrypoint invoked at runtime.",
+    service: "Encapsulates business logic called by routes and workers.",
+    worker: "Runs background / queued work out of the request path.",
+    dbModel: "Defines a persisted data shape / schema.",
+    firestoreCollection: "A Firestore collection read from / written to by code.",
+    component: "Renders part of the UI.",
+    config: "Configures build, runtime or deployment behaviour.",
+    test: "Verifies behaviour of the code it imports.",
+    documentation: "Human-readable documentation.",
+    externalPackage: "Third-party dependency imported by the project.",
+    file: "Source file in the repository."
+  };
+  return map[type] || "Source element in the project graph.";
+}
+
+interface NodeDetailBlock {
+  purpose: string;
+  stack: string[];
+  inputs: string[];
+  outputs: string[];
+  logic: string;
+  risks: string[];
+  files: string[];
+}
+
+function buildNodeDetails(
+  node: IntelNode,
+  related: RelatedRef[],
+  risks: { title: string; severity: string; detail: string }[],
+  topTechnologies: string[]
+): NodeDetailBlock {
+  const edgeLabel = (e: string) => e.replace(/_/g, " ");
+  const inputs = related
+    .filter((r) => r.direction === "in")
+    .slice(0, DETAIL_LIST_CAP)
+    .map((r) => clampText(`${edgeLabel(r.edgeType)} \u2190 ${r.label}`, 160));
+  const outputs = related
+    .filter((r) => r.direction === "out")
+    .slice(0, DETAIL_LIST_CAP)
+    .map((r) => clampText(`${edgeLabel(r.edgeType)} \u2192 ${r.label}`, 160));
+
+  const stack = new Set<string>();
+  const lang = node.metadata?.language;
+  if (typeof lang === "string" && lang) stack.add(lang);
+  const role = node.metadata?.role;
+  if (typeof role === "string" && role && role !== "other") stack.add(role);
+  // The project root summarises the whole stack.
+  if (node.type === "project") for (const t of topTechnologies) stack.add(t);
+
+  return {
+    purpose: clampText(node.description || logicForType(node.type)),
+    stack: Array.from(stack).slice(0, DETAIL_LIST_CAP),
+    inputs,
+    outputs,
+    logic: logicForType(node.type),
+    risks: risks.map((r) => clampText(`${r.title}: ${r.detail}`, 240)).slice(0, DETAIL_LIST_CAP),
+    files: node.files.slice(0, DETAIL_FILE_CAP)
+  };
+}
+
 // Light node shape stored in the fast-read snapshot (no description/files — those
 // are fetched lazily from project_nodes on click).
 function lightNode(n: IntelNode) {
@@ -217,12 +300,17 @@ export async function persistScanGraph(input: PersistGraphInput): Promise<void> 
     }
   }
 
+  // Top technologies feed the project-root node's `stack` detail.
+  const topTechnologies = input.technologies.slice(0, 12).map((t) => t.name);
+
   // Per-node detail docs (lazy-loaded). Doc id = `${scanId}__${nodeId}`.
   for (let i = 0; i < input.nodes.length; i += WRITE_BATCH) {
     const slice = input.nodes.slice(i, i + WRITE_BATCH);
     const batch = db.batch();
     for (const n of slice) {
       const ref = db.collection("project_nodes").doc(`${scanId}__${n.id}`);
+      const nodeRelated = (related.get(n.id) || []).slice(0, 60);
+      const nodeRisks = risksByNode.get(n.id) || [];
       batch.set(ref, {
         ...base,
         nodeId: n.id,
@@ -234,8 +322,11 @@ export async function persistScanGraph(input: PersistGraphInput): Promise<void> 
         layers: n.layers,
         files: n.files,
         metadata: n.metadata,
-        related: (related.get(n.id) || []).slice(0, 60),
-        risks: risksByNode.get(n.id) || []
+        related: nodeRelated,
+        risks: nodeRisks,
+        // Synthesized "Read more" block: purpose / stack / inputs / outputs /
+        // logic / risks / files. Capped (see buildNodeDetails) so it stays small.
+        details: buildNodeDetails(n, nodeRelated, nodeRisks, topTechnologies)
       });
     }
     await batch.commit();
@@ -246,36 +337,132 @@ export async function persistScanGraph(input: PersistGraphInput): Promise<void> 
 /* Reads for the API                                                          */
 /* -------------------------------------------------------------------------- */
 
+// Map an Insight (stored on the snapshot) to a human-readable risk row.
+function insightToRisk(ins: Insight): MapRisk {
+  return {
+    id: ins.id,
+    title: ins.title,
+    severity: ins.severity,
+    detail: ins.detail,
+    files: ins.files,
+    nodeIds: ins.nodeIds
+  };
+}
+
+// Derive third-party dependencies from the externalPackage nodes in the graph.
+function dependenciesFromNodes(nodes: any[]): MapDependency[] {
+  return nodes
+    .filter((n) => n.type === "externalPackage")
+    .map((n) => ({
+      name: String(n.label || n.id),
+      category: "other" as const,
+      usedBy: Number((n.metadata && n.metadata.usedBy) ?? 0) || undefined,
+      confidence: n.confidence
+    }))
+    .sort((a, b) => (b.usedBy ?? 0) - (a.usedBy ?? 0));
+}
+
+// Collapse `node.group` handles into named groups (label = parent node label).
+function groupsFromNodes(nodes: any[]): MapGroup[] {
+  const labelById = new Map<string, string>();
+  for (const n of nodes) labelById.set(String(n.id), String(n.label || n.id));
+  const members = new Map<string, string[]>();
+  for (const n of nodes) {
+    const g = n.group ? String(n.group) : "";
+    if (!g) continue;
+    if (!members.has(g)) members.set(g, []);
+    members.get(g)!.push(String(n.id));
+  }
+  return Array.from(members.entries()).map(([id, nodeIds]) => ({
+    id,
+    label: labelById.get(id) || id,
+    nodeIds
+  }));
+}
+
 export async function readMapPayload(userId: string, projectId: string): Promise<MapPayload | null> {
   const scan = await readLatestScan(userId, projectId);
   if (!scan) return null;
   const status = (scan.status as ScanStatus) || "pending";
   const mapDoc = await db.collection("project_maps").doc(scan.id).get();
+
+  // Project-level summary (best-effort; never blocks the map render).
+  let summary: string | null = null;
+  try {
+    const proj = await db.collection("projects").doc(projectId).get();
+    const pdata = proj.data();
+    if (proj.exists && pdata?.userId === userId && typeof pdata?.summary === "string") {
+      summary = pdata.summary as string;
+    }
+  } catch {
+    summary = null;
+  }
+
   if (!mapDoc.exists) {
     // Scan exists but no graph yet (still running / failed).
     return {
       scanId: scan.id,
       status,
+      summary,
       nodes: [],
       edges: [],
       technologies: [],
       features: [],
       insights: [],
-      stats: { files: 0, nodes: 0, edges: 0 }
+      dependencies: [],
+      risks: [],
+      groups: [],
+      fileIndex: [],
+      stats: { files: 0, nodes: 0, edges: 0, risks: 0, technologies: 0 }
     };
   }
   const data = mapDoc.data() || {};
   if (data.userId !== userId) return null;
+
+  const nodes = (data.nodes as any[]) || [];
+  const edges = (data.edges as any[]) || [];
+  const technologies = (data.technologies as Technology[]) || [];
+  const features = (data.features as Feature[]) || [];
+  const insights = (data.insights as Insight[]) || [];
+  const baseStats = (data.stats as MapPayload["stats"]) || { files: 0, nodes: 0, edges: 0 };
+
+  // File index lives in its own (potentially large) doc; read + cap for transport.
+  let fileIndex: FileIndexEntry[] = [];
+  try {
+    const fiDoc = await db.collection("project_file_index").doc(scan.id).get();
+    const fiData = fiDoc.data();
+    if (fiDoc.exists && fiData?.userId === userId) {
+      fileIndex = ((fiData.files as FileIndexEntry[]) || []).slice(0, 2000);
+    }
+  } catch {
+    fileIndex = [];
+  }
+
+  const risks = insights.map(insightToRisk);
+  const dependencies = dependenciesFromNodes(nodes);
+  const groups = groupsFromNodes(nodes);
+
   return {
     scanId: scan.id,
     status,
     generatedAt: tsMillis(data.createdAt) || undefined,
-    nodes: (data.nodes as any[]) || [],
-    edges: (data.edges as any[]) || [],
-    technologies: (data.technologies as Technology[]) || [],
-    features: (data.features as Feature[]) || [],
-    insights: (data.insights as Insight[]) || [],
-    stats: (data.stats as MapPayload["stats"]) || { files: 0, nodes: 0, edges: 0 }
+    summary,
+    nodes,
+    edges,
+    technologies,
+    features,
+    insights,
+    dependencies,
+    risks,
+    groups,
+    fileIndex,
+    stats: {
+      files: baseStats.files ?? fileIndex.length,
+      nodes: baseStats.nodes ?? nodes.length,
+      edges: baseStats.edges ?? edges.length,
+      risks: risks.length,
+      technologies: technologies.length
+    }
   };
 }
 

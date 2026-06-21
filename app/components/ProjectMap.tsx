@@ -9,7 +9,6 @@ import {
   MiniMap,
   Handle,
   Position,
-  applyNodeChanges,
   useReactFlow,
   type Node,
   type Edge,
@@ -17,6 +16,7 @@ import {
   type NodeProps
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import "./projectMapWorkspace.css";
 import {
   NODE_TYPES,
   NODE_TYPE_LABEL,
@@ -25,6 +25,18 @@ import {
   type IntelLayerId,
   type IntelNodeType
 } from "./intelTypes";
+import type {
+  ProjectMapNode,
+  ProjectMapEdge,
+  ProjectTechnology,
+  ProjectFeature,
+  ProjectInsight,
+  ProjectRisk,
+  ProjectDependency,
+  ProjectFileIndexItem,
+  ProjectMapGroup,
+  NodeDetails
+} from "../types/projectMap";
 
 interface IntelNodeData {
   label: string;
@@ -48,6 +60,11 @@ interface RawNode {
   layers: IntelLayerId[];
   position: { x: number; y: number };
   hasRisk?: boolean;
+  // Optional richer fields (present in the demo payload / future enriched scans).
+  description?: string;
+  tags?: string[];
+  files?: string[];
+  details?: NodeDetails;
 }
 interface RawEdge {
   id: string;
@@ -58,13 +75,25 @@ interface RawEdge {
   layers: IntelLayerId[];
 }
 
+// Backwards-compatible payload shape. The first six fields are the original
+// contract (unchanged); the rest are OPTIONAL enrichment served by the updated
+// `GET /projects/:id/scan/map` and are tolerated-when-absent so old scans and
+// older callers keep working.
 export interface ProjectMapData {
   nodes: RawNode[];
   edges: RawEdge[];
-  technologies: { id: string; name: string; category: string; confidence: string }[];
-  features: { id: string; key: string; label: string; description?: string; confidence: string }[];
-  insights: { id: string; kind: string; severity: string; title: string; detail: string; confidence: string }[];
-  stats: { files: number; nodes: number; edges: number };
+  technologies: ProjectTechnology[];
+  features: ProjectFeature[];
+  insights: ProjectInsight[];
+  stats: { files: number; nodes: number; edges: number; risks?: number; technologies?: number };
+  summary?: string | null;
+  risks?: ProjectRisk[];
+  dependencies?: ProjectDependency[];
+  fileIndex?: ProjectFileIndexItem[];
+  groups?: ProjectMapGroup[];
+  scanId?: string;
+  status?: string;
+  generatedAt?: number;
 }
 
 export interface ProjectMapProps {
@@ -72,9 +101,181 @@ export interface ProjectMapProps {
   t: any;
   onSelectNode: (nodeId: string | null) => void;
   selectedNodeId: string | null;
+  // Optional: project name shown in the summary panel header.
+  projectName?: string;
+  // Optional: when both are provided, ProjectMap renders the "Read more" node
+  // detail as an in-canvas drawer itself (instead of the host doing it).
+  renderNodeDetail?: (nodeId: string) => React.ReactNode;
 }
 
-// Custom node renderer — colour + glyph come from CSS via the `type-<x>` class.
+/* -------------------------------------------------------------------------- */
+/* Pure export builders (exported for unit tests + reused by the toolbar).    */
+/* -------------------------------------------------------------------------- */
+
+const t = (v: unknown): string => (typeof v === "string" ? v : "");
+const titleOf = (n: RawNode | ProjectMapNode): string =>
+  (n as ProjectMapNode).title || n.label || n.id;
+const kindOf = (n: RawNode | ProjectMapNode): string =>
+  ((n as ProjectMapNode).kind as string) || (n.type as string) || "file";
+
+// Full JSON payload of the map (pretty-printed). Safe on partial data.
+export function buildMapJson(data: ProjectMapData): string {
+  return JSON.stringify(
+    {
+      scanId: data.scanId ?? null,
+      status: data.status ?? null,
+      generatedAt: data.generatedAt ?? null,
+      summary: data.summary ?? null,
+      stats: data.stats ?? { files: 0, nodes: 0, edges: 0 },
+      technologies: data.technologies ?? [],
+      features: data.features ?? [],
+      dependencies: data.dependencies ?? [],
+      risks: data.risks ?? [],
+      insights: data.insights ?? [],
+      fileIndex: data.fileIndex ?? [],
+      groups: data.groups ?? [],
+      nodes: data.nodes ?? [],
+      edges: data.edges ?? []
+    },
+    null,
+    2
+  );
+}
+
+// Human-readable Markdown report. Each section is omitted gracefully when the
+// underlying data is missing, so a legacy payload still produces valid output.
+export function buildMapMarkdown(data: ProjectMapData, projectName = "Project"): string {
+  const lines: string[] = [];
+  const push = (s = "") => lines.push(s);
+
+  push(`# ${projectName} — Project Map`);
+  push();
+  if (data.summary) {
+    push("## Summary");
+    push();
+    push(t(data.summary).trim());
+    push();
+  }
+
+  const s = data.stats || { files: 0, nodes: 0, edges: 0 };
+  push("## Overview");
+  push();
+  push(`- Nodes: ${s.nodes ?? (data.nodes?.length || 0)}`);
+  push(`- Edges: ${s.edges ?? (data.edges?.length || 0)}`);
+  push(`- Files: ${s.files ?? (data.fileIndex?.length || 0)}`);
+  push(`- Risks: ${s.risks ?? (data.risks?.length || 0)}`);
+  push(`- Technologies: ${s.technologies ?? (data.technologies?.length || 0)}`);
+  push();
+
+  if (data.technologies?.length) {
+    push("## Technologies");
+    push();
+    for (const tech of data.technologies) {
+      const ver = tech.version ? ` \`${tech.version}\`` : "";
+      push(`- **${tech.name}**${ver} — ${tech.category}${tech.confidence ? ` (${tech.confidence})` : ""}`);
+    }
+    push();
+  }
+
+  if (data.features?.length) {
+    push("## Features");
+    push();
+    for (const f of data.features) {
+      push(`- **${f.label}**${f.description ? ` — ${t(f.description)}` : ""}`);
+    }
+    push();
+  }
+
+  if (data.dependencies?.length) {
+    push("## Dependencies");
+    push();
+    for (const d of data.dependencies) {
+      push(`- ${d.name}${d.usedBy ? ` (used by ${d.usedBy} file(s))` : ""}`);
+    }
+    push();
+  }
+
+  if (data.risks?.length) {
+    push("## Risks");
+    push();
+    for (const r of data.risks) {
+      push(`- **[${r.severity}] ${r.title}** — ${t(r.detail)}`);
+    }
+    push();
+  }
+
+  if (data.nodes?.length) {
+    push("## Nodes");
+    push();
+    for (const n of data.nodes) {
+      push(`### ${titleOf(n)}`);
+      push();
+      push(`- Kind: \`${kindOf(n)}\``);
+      if (n.description) push(`- Description: ${t(n.description)}`);
+      const d = n.details;
+      if (d) {
+        if (d.purpose) push(`- Purpose: ${t(d.purpose)}`);
+        if (d.stack?.length) push(`- Stack: ${d.stack.join(", ")}`);
+        if (d.inputs?.length) push(`- Inputs: ${d.inputs.join("; ")}`);
+        if (d.outputs?.length) push(`- Outputs: ${d.outputs.join("; ")}`);
+        if (d.logic) push(`- Logic: ${t(d.logic)}`);
+        if (d.risks?.length) push(`- Risks: ${d.risks.join("; ")}`);
+        if (d.files?.length) push(`- Files: ${d.files.join(", ")}`);
+      } else if (n.files?.length) {
+        push(`- Files: ${n.files.join(", ")}`);
+      }
+      push();
+    }
+  }
+
+  if (data.edges?.length) {
+    push("## Edges");
+    push();
+    for (const e of data.edges) {
+      push(`- ${e.source} → ${e.target}${e.label ? ` (${e.label})` : ""}`);
+    }
+    push();
+  }
+
+  if (data.fileIndex?.length) {
+    push("## File index");
+    push();
+    for (const f of data.fileIndex) {
+      push(`- \`${f.path}\`${f.role ? ` — ${f.role}` : ""}${f.language ? ` (${f.language})` : ""}`);
+    }
+    push();
+  }
+
+  if (data.insights?.length) {
+    push("## Insights");
+    push();
+    for (const i of data.insights) {
+      push(`- **[${i.severity}] ${i.title}** — ${t(i.detail)}`);
+    }
+    push();
+  }
+
+  return lines.join("\n");
+}
+
+// Trigger a client-side download via Blob (no extra dependency).
+function downloadText(filename: string, content: string, mime: string) {
+  if (typeof document === "undefined") return;
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Node renderer                                                              */
+/* -------------------------------------------------------------------------- */
+
 function IntelNode({ data, selected }: NodeProps) {
   const d = data as IntelNodeData;
   const cls = [
@@ -103,42 +304,79 @@ function IntelNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { intel: IntelNode };
 
-function FlowInner({ data, t, onSelectNode, selectedNodeId }: ProjectMapProps) {
+const NODE_W = 190;
+const NODE_H = 56;
+
+function FlowInner({ data, t: tr, onSelectNode, selectedNodeId, projectName, renderNodeDetail }: ProjectMapProps) {
   const [layer, setLayer] = useState<IntelLayerId>("overview");
   const [enabledTypes, setEnabledTypes] = useState<Set<IntelNodeType>>(new Set(NODE_TYPES));
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [helpOpen, setHelpOpen] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(true);
   const { fitView } = useReactFlow();
 
-  const lbl = (map: Record<string, string>, key: string, fallback: string) =>
+  const lbl = (map: Record<string, string> | undefined, key: string, fallback: string) =>
     (map && map[key]) || fallback;
 
-  // A node is collapsible if it parents other nodes (feature/module).
+  const nodes = data.nodes || [];
+  const edges = data.edges || [];
+
   const collapsibleIds = useMemo(() => {
     const parents = new Set<string>();
-    for (const n of data.nodes) if (n.group) parents.add(n.group);
+    for (const n of nodes) if (n.group) parents.add(n.group);
     return parents;
-  }, [data.nodes]);
+  }, [nodes]);
+
+  // Per-node search index: title + kind + description + tags + files + risks.
+  const searchIndex = useMemo(() => {
+    const riskByNode = new Map<string, string[]>();
+    for (const r of data.risks || []) {
+      for (const id of r.nodeIds || []) {
+        if (!riskByNode.has(id)) riskByNode.set(id, []);
+        riskByNode.get(id)!.push(r.title);
+      }
+    }
+    const idx = new Map<string, string>();
+    for (const n of nodes) {
+      const parts = [
+        titleOf(n),
+        kindOf(n),
+        n.description || "",
+        ...(n.tags || []),
+        ...(n.files || []),
+        ...(riskByNode.get(n.id) || [])
+      ];
+      idx.set(n.id, parts.join(" \u00b7 ").toLowerCase());
+    }
+    return idx;
+  }, [nodes, data.risks]);
 
   const q = query.trim().toLowerCase();
+  const matchesNode = useCallback(
+    (id: string) => q.length > 0 && (searchIndex.get(id) || "").includes(q),
+    [q, searchIndex]
+  );
 
   const visibleNodes = useMemo<Node[]>(() => {
-    return data.nodes
-      .filter((n) => n.layers.includes(layer))
+    return nodes
+      .filter((n) => (n.layers || []).includes(layer))
       .filter((n) => enabledTypes.has(n.type))
       .filter((n) => !(n.group && collapsed.has(n.group)))
       .map((n) => {
-        const match = q.length > 0 && n.label.toLowerCase().includes(q);
+        const match = matchesNode(n.id);
         const dim = q.length > 0 && !match;
         const pos = positions[n.id] || n.position;
         return {
           id: n.id,
           type: "intel",
           position: pos,
+          initialWidth: NODE_W,
+          initialHeight: NODE_H,
           selected: n.id === selectedNodeId,
           data: {
-            label: n.label,
+            label: titleOf(n),
             ntype: n.type,
             confidence: n.confidence,
             hasRisk: !!n.hasRisk,
@@ -150,13 +388,13 @@ function FlowInner({ data, t, onSelectNode, selectedNodeId }: ProjectMapProps) {
           } as IntelNodeData
         } as Node;
       });
-  }, [data.nodes, layer, enabledTypes, collapsed, q, positions, selectedNodeId, collapsibleIds]);
+  }, [nodes, layer, enabledTypes, collapsed, q, positions, selectedNodeId, collapsibleIds, matchesNode]);
 
   const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes]);
 
   const visibleEdges = useMemo<Edge[]>(() => {
-    return data.edges
-      .filter((e) => e.layers.includes(layer))
+    return edges
+      .filter((e) => (e.layers || []).includes(layer))
       .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
       .map((e) => ({
         id: e.id,
@@ -166,10 +404,9 @@ function FlowInner({ data, t, onSelectNode, selectedNodeId }: ProjectMapProps) {
         className: `intel-edge type-${e.type}`,
         animated: layer === "dataFlow" || layer === "uiFlow"
       }));
-  }, [data.edges, layer, visibleIds]);
+  }, [edges, layer, visibleIds]);
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
-    // Persist drag positions so filtering doesn't reset the layout.
     setPositions((cur) => {
       const next = { ...cur };
       for (const ch of changes) {
@@ -192,36 +429,81 @@ function FlowInner({ data, t, onSelectNode, selectedNodeId }: ProjectMapProps) {
     (_: React.MouseEvent, node: Node) => onSelectNode(node.id),
     [onSelectNode]
   );
-  const onNodeDoubleClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
-      const d = node.data as IntelNodeData;
-      if (!d.collapsible) return;
-      setCollapsed((cur) => {
-        const next = new Set(cur);
-        if (next.has(node.id)) next.delete(node.id);
-        else next.add(node.id);
-        return next;
-      });
-    },
-    []
-  );
+  const onNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
+    const d = node.data as IntelNodeData;
+    if (!d.collapsible) return;
+    setCollapsed((cur) => {
+      const next = new Set(cur);
+      if (next.has(node.id)) next.delete(node.id);
+      else next.add(node.id);
+      return next;
+    });
+  }, []);
 
-  // Reframe when the active layer changes.
   useEffect(() => {
     const id = setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 60);
     return () => clearTimeout(id);
   }, [layer, fitView]);
 
+  const resetView = useCallback(() => {
+    setPositions({});
+    setCollapsed(new Set());
+    setEnabledTypes(new Set(NODE_TYPES));
+    setQuery("");
+    setLayer("overview");
+    setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 60);
+  }, [fitView]);
+
   const presentTypes = useMemo(() => {
     const s = new Set<IntelNodeType>();
-    for (const n of data.nodes) s.add(n.type);
+    for (const n of nodes) s.add(n.type);
     return s;
-  }, [data.nodes]);
+  }, [nodes]);
+
+  const stats = data.stats || { files: 0, nodes: 0, edges: 0 };
+  const statItems: { key: string; label: string; value: number }[] = [
+    { key: "nodes", label: lbl(tr?.intelStat, "nodes", "Nodes"), value: stats.nodes ?? nodes.length },
+    { key: "edges", label: lbl(tr?.intelStat, "edges", "Edges"), value: stats.edges ?? edges.length },
+    { key: "files", label: lbl(tr?.intelStat, "files", "Files"), value: stats.files ?? (data.fileIndex?.length || 0) },
+    { key: "risks", label: lbl(tr?.intelStat, "risks", "Risks"), value: stats.risks ?? (data.risks?.length || 0) },
+    {
+      key: "technologies",
+      label: lbl(tr?.intelStat, "technologies", "Tech"),
+      value: stats.technologies ?? (data.technologies?.length || 0)
+    }
+  ];
+
+  const exportJson = () =>
+    downloadText(`${(projectName || "project").toLowerCase().replace(/\s+/g, "-")}-map.json`, buildMapJson(data), "application/json");
+  const exportMarkdown = () =>
+    downloadText(`${(projectName || "project").toLowerCase().replace(/\s+/g, "-")}-map.md`, buildMapMarkdown(data, projectName), "text/markdown");
+
+  const legendTypes = NODE_TYPES.filter((tp) => presentTypes.has(tp));
 
   return (
-    <div className="intel-map">
-      <div className="intel-toolbar">
-        <div className="intel-layers">
+    <div className="pmw intel-map">
+      {/* Header toolbar */}
+      <div className="pmw-toolbar intel-toolbar">
+        <div className="pmw-toolbar-left">
+          <button
+            type="button"
+            className={`pmw-toggle ${helpOpen ? "on" : ""}`}
+            onClick={() => setHelpOpen((v) => !v)}
+            aria-pressed={helpOpen}
+            title={tr?.intelHelpTitle || "How to read the map"}
+          >
+            {tr?.intelHelpShort || "Legend"}
+          </button>
+          <div className="intel-search pmw-search">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={tr?.intelSearchPlaceholder || "Search nodes, files, risks\u2026"}
+              aria-label={tr?.intelSearchPlaceholder || "Search the map"}
+            />
+          </div>
+        </div>
+        <div className="intel-layers pmw-layers">
           {LAYERS.map((id) => (
             <button
               key={id}
@@ -229,22 +511,38 @@ function FlowInner({ data, t, onSelectNode, selectedNodeId }: ProjectMapProps) {
               className={`intel-layer-btn ${layer === id ? "on" : ""}`}
               onClick={() => setLayer(id)}
             >
-              {lbl(t?.intelLayers, id, LAYER_LABEL[id])}
+              {lbl(tr?.intelLayers, id, LAYER_LABEL[id])}
             </button>
           ))}
         </div>
-        <div className="intel-search">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t?.intelSearchPlaceholder || "Search nodes\u2026"}
-            aria-label={t?.intelSearchPlaceholder || "Search nodes"}
-          />
+        <div className="pmw-toolbar-actions">
+          <button type="button" className="pmw-btn" onClick={() => fitView({ padding: 0.2, duration: 300 })}>
+            {tr?.intelFit || "Fit"}
+          </button>
+          <button type="button" className="pmw-btn" onClick={resetView}>
+            {tr?.intelReset || "Reset"}
+          </button>
+          <button type="button" className="pmw-btn" onClick={exportJson}>
+            {tr?.intelExportJson || "Export JSON"}
+          </button>
+          <button type="button" className="pmw-btn primary" onClick={exportMarkdown}>
+            {tr?.intelExportMd || "Export Markdown"}
+          </button>
+          <button
+            type="button"
+            className={`pmw-toggle ${summaryOpen ? "on" : ""}`}
+            onClick={() => setSummaryOpen((v) => !v)}
+            aria-pressed={summaryOpen}
+            title={tr?.intelSummaryTitle || "Project summary"}
+          >
+            {tr?.intelSummaryShort || "Summary"}
+          </button>
         </div>
       </div>
 
-      <div className="intel-filters">
-        {NODE_TYPES.filter((tp) => presentTypes.has(tp)).map((tp) => (
+      {/* Type filter chips */}
+      <div className="intel-filters pmw-filters">
+        {legendTypes.map((tp) => (
           <button
             key={tp}
             type="button"
@@ -252,32 +550,132 @@ function FlowInner({ data, t, onSelectNode, selectedNodeId }: ProjectMapProps) {
             onClick={() => toggleType(tp)}
           >
             <span className="intel-chip-dot" />
-            {lbl(t?.intelNodeTypes, tp, NODE_TYPE_LABEL[tp])}
+            {lbl(tr?.intelNodeTypes, tp, NODE_TYPE_LABEL[tp])}
           </button>
         ))}
       </div>
 
-      <div className="intel-canvas">
-        <ReactFlow
-          nodes={visibleNodes}
-          edges={visibleEdges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onNodeClick={onNodeClick}
-          onNodeDoubleClick={onNodeDoubleClick}
-          onPaneClick={() => onSelectNode(null)}
-          nodesDraggable
-          nodesConnectable={false}
-          minZoom={0.1}
-          fitView
-          proOptions={{ hideAttribution: false }}
-        >
-          <Background />
-          <Controls />
-          <MiniMap pannable zoomable nodeClassName={(n) => `mm-${(n.data as IntelNodeData)?.ntype || "file"}`} />
-        </ReactFlow>
-        {visibleNodes.length === 0 ? (
-          <div className="intel-empty-layer">{t?.intelEmptyLayer || "Nothing to show in this view."}</div>
+      <div className="pmw-body">
+        {/* Left: how to read + legend */}
+        {helpOpen ? (
+          <aside className="pmw-help" aria-label={tr?.intelHelpTitle || "How to read the map"}>
+            <h4>{tr?.intelHelpTitle || "How to read the map"}</h4>
+            <p className="pmw-muted">
+              {tr?.intelHelpBody ||
+                "Each card is a working part of the system. Arrows show how data flows between them. Switch layers to change the view, filter node types, then click any node and choose Read more for stack, inputs/outputs, logic, risks and files."}
+            </p>
+            <h5>{tr?.intelLayersTitle || "Layers"}</h5>
+            <ul className="pmw-legend-list">
+              {LAYERS.map((id) => (
+                <li key={id}>
+                  <span className={`pmw-layer-dot layer-${id}`} />
+                  {lbl(tr?.intelLayers, id, LAYER_LABEL[id])}
+                </li>
+              ))}
+            </ul>
+            {legendTypes.length ? (
+              <>
+                <h5>{tr?.intelLegendTitle || "Node types"}</h5>
+                <ul className="pmw-legend-list">
+                  {legendTypes.map((tp) => (
+                    <li key={tp}>
+                      <span className={`pmw-type-dot type-${tp}`} />
+                      {lbl(tr?.intelNodeTypes, tp, NODE_TYPE_LABEL[tp])}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </aside>
+        ) : null}
+
+        {/* Center: draggable / zoomable canvas */}
+        <div className="intel-canvas pmw-canvas">
+          <ReactFlow
+            nodes={visibleNodes}
+            edges={visibleEdges}
+            nodeTypes={nodeTypes}
+            onNodesChange={onNodesChange}
+            onNodeClick={onNodeClick}
+            onNodeDoubleClick={onNodeDoubleClick}
+            onPaneClick={() => onSelectNode(null)}
+            nodesDraggable
+            nodesConnectable={false}
+            minZoom={0.1}
+            fitView
+            proOptions={{ hideAttribution: false }}
+          >
+            <Background gap={20} />
+            <Controls />
+            <MiniMap pannable zoomable nodeClassName={(n) => `mm-${(n.data as IntelNodeData)?.ntype || "file"}`} />
+          </ReactFlow>
+          {visibleNodes.length === 0 ? (
+            <div className="intel-empty-layer">{tr?.intelEmptyLayer || "Nothing to show in this view."}</div>
+          ) : null}
+          {/* Node detail "Read more" drawer (host-provided). */}
+          {selectedNodeId && renderNodeDetail ? (
+            <div className="pmw-detail" role="dialog" aria-label={tr?.intelNodeDetails || "Node details"}>
+              {renderNodeDetail(selectedNodeId)}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Right: project summary + stats + tech/features/risks */}
+        {summaryOpen ? (
+          <aside className="pmw-summary" aria-label={tr?.intelSummaryTitle || "Project summary"}>
+            <div className="pmw-summary-head">
+              <h4>{projectName || tr?.intelSummaryTitle || "Project summary"}</h4>
+            </div>
+            <div className="pmw-stats">
+              {statItems.map((s) => (
+                <div key={s.key} className="pmw-stat">
+                  <span className="pmw-stat-value">{s.value}</span>
+                  <span className="pmw-stat-label">{s.label}</span>
+                </div>
+              ))}
+            </div>
+            {data.summary ? (
+              <section className="pmw-section">
+                <h5>{tr?.intelSummaryTitle || "Summary"}</h5>
+                <p className="pmw-summary-text">{t(data.summary)}</p>
+              </section>
+            ) : null}
+            {data.technologies?.length ? (
+              <section className="pmw-section">
+                <h5>{tr?.intelTechnologies || "Technologies"} ({data.technologies.length})</h5>
+                <div className="pmw-tags">
+                  {data.technologies.slice(0, 40).map((tech) => (
+                    <span key={tech.id} className="pmw-tag" title={tech.category}>
+                      {tech.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            {data.features?.length ? (
+              <section className="pmw-section">
+                <h5>{tr?.intelFeatures || "Features"} ({data.features.length})</h5>
+                <ul className="pmw-list">
+                  {data.features.slice(0, 30).map((f) => (
+                    <li key={f.id}>{f.label}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+            {data.risks?.length ? (
+              <section className="pmw-section">
+                <h5>{tr?.intelRisks || "Risks"} ({data.risks.length})</h5>
+                <ul className="pmw-risk-list">
+                  {data.risks.slice(0, 20).map((r, i) => (
+                    <li key={r.id || i} className={`sev-${r.severity}`}>
+                      <b>{r.title}</b>
+                      {r.detail ? <span>{t(r.detail)}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </aside>
         ) : null}
       </div>
     </div>

@@ -9,7 +9,8 @@ import { listScoped } from "../listing";
 import { bumpCounter, CountedCollection } from "../stats";
 import { sendError, notFound, badRequest } from "../errors";
 import { enqueueIngest } from "../tasks";
-import { enqueueScan } from "../projectScan";
+import { enqueueScan, runScanJob } from "../projectScan";
+import { log } from "../log";
 import {
   createScan,
   readLatestScan,
@@ -214,12 +215,51 @@ async function startScanHandler(req: AuthedRequest, res: Response): Promise<void
       lastScanRequestedAt: serverTime(),
       updatedAt: serverTime()
     });
-    await enqueueScan({ userId: req.userId!, projectId: doc.id, scanId, repoUrl, scanToken, options });
+    const payload = { userId: req.userId!, projectId: doc.id, scanId, repoUrl, scanToken, options };
     await logEvent(req.userId!, "project_scan_queued", repoUrl, { projectId: doc.id, scanId });
+
+    if (scanRunsSync()) {
+      // Deployed environments may lack the Cloud Tasks OIDC invoker binding on
+      // the scanWorker Run service, so run the (bounded) scan inline within this
+      // request instead of dispatching a task that would be rejected. runScanJob
+      // records its own success/failure on the scan + project docs.
+      try {
+        await runScanJob(payload);
+      } catch (err) {
+        log("error", "scan_sync_failed", {
+          projectId: doc.id,
+          scanId,
+          message: err instanceof Error ? err.message : String(err)
+        });
+      }
+      const fresh = (await doc.ref.get()).data() || {};
+      const mapStatus = String(fresh.mapStatus || "error");
+      res.status(200).json({
+        status: mapStatus,
+        scanId,
+        projectId: doc.id,
+        nodeCount: Number(fresh.mapNodeCount ?? 0),
+        edgeCount: Number(fresh.mapEdgeCount ?? 0)
+      });
+      return;
+    }
+
+    await enqueueScan(payload);
     res.status(202).json({ status: "queued", scanId, projectId: doc.id });
   } catch (err) {
     sendError(req, res, err);
   }
+}
+
+// Whether the scan should run synchronously inside the request. Tests and local
+// emulator runs keep the async enqueue path (so the 202 contract is preserved);
+// deployed runtimes default to synchronous because Cloud Tasks invocation of the
+// worker requires a run.invoker IAM binding that may be missing. Override with
+// SCAN_SYNC=1 / SCAN_SYNC=0.
+function scanRunsSync(): boolean {
+  if (process.env.SCAN_SYNC === "1") return true;
+  if (process.env.SCAN_SYNC === "0") return false;
+  return !process.env.FUNCTIONS_EMULATOR && !process.env.FIRESTORE_EMULATOR_HOST;
 }
 
 projectsRouter.post("/projects/:id/scan", rateLimit("project-scan", 6, 60_000), startScanHandler);

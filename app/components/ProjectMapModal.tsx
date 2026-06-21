@@ -68,14 +68,22 @@ export function ProjectMapModal({ g, projectId, projectName, onClose }: ProjectM
         </div>
       ) : completed ? (
         <div className="intel-modal-grid">
-          <ProjectMap data={map!} t={t} onSelectNode={setSelectedNodeId} selectedNodeId={selectedNodeId} />
-          <NodeDetailSidebar
-            projectId={projectId}
-            nodeId={selectedNodeId}
-            loadNodeDetail={g.loadNodeDetail}
-            onClose={() => setSelectedNodeId(null)}
-            onNavigate={setSelectedNodeId}
+          <ProjectMap
+            data={map!}
             t={t}
+            projectName={projectName}
+            onSelectNode={setSelectedNodeId}
+            selectedNodeId={selectedNodeId}
+            renderNodeDetail={(nodeId) => (
+              <NodeDetailSidebar
+                projectId={projectId}
+                nodeId={nodeId}
+                loadNodeDetail={g.loadNodeDetail}
+                onClose={() => setSelectedNodeId(null)}
+                onNavigate={setSelectedNodeId}
+                t={t}
+              />
+            )}
           />
         </div>
       ) : status === "failed" ? (

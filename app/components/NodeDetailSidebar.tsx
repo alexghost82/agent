@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Json } from "../api";
 import { NODE_TYPE_LABEL, type IntelNodeType } from "./intelTypes";
+import type { NodeDetails } from "../types/projectMap";
 
 export interface NodeDetailSidebarProps {
   projectId: string;
@@ -57,6 +58,7 @@ export function NodeDetailSidebar({ projectId, nodeId, loadNodeDetail, onClose, 
   const files = (detail?.files as string[] | undefined) || [];
   const risks = (detail?.risks as Risk[] | undefined) || [];
   const metadata = (detail?.metadata as Record<string, unknown> | undefined) || {};
+  const details = (detail?.details as NodeDetails | undefined) || undefined;
   const inferred = detail?.confidence === "inferred";
 
   const touches = (kinds: IntelNodeType[]) => related.filter((r) => kinds.includes(r.type));
@@ -88,6 +90,53 @@ export function NodeDetailSidebar({ projectId, nodeId, loadNodeDetail, onClose, 
               {String(detail.description)}
               {inferred ? <span className="intel-badge inferred inline">{t?.intelInferred || "AI inferred"}</span> : null}
             </p>
+          ) : null}
+
+          {details ? (
+            <section className="intel-details">
+              {details.purpose ? (
+                <div className="intel-detail-row">
+                  <h5>{t?.intelPurpose || "Purpose"}</h5>
+                  <p>{details.purpose}</p>
+                </div>
+              ) : null}
+              {details.logic ? (
+                <div className="intel-detail-row">
+                  <h5>{t?.intelLogic || "Logic"}</h5>
+                  <p>{details.logic}</p>
+                </div>
+              ) : null}
+              {details.stack?.length ? (
+                <div className="intel-detail-row">
+                  <h5>{t?.intelStack || "Stack"}</h5>
+                  <div className="pmw-tags">
+                    {details.stack.map((s, i) => (
+                      <span key={`${s}-${i}`} className="pmw-tag">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {details.inputs?.length ? (
+                <div className="intel-detail-row">
+                  <h5>{t?.intelInputs || "Inputs"}</h5>
+                  <ul className="intel-io-list">
+                    {details.inputs.map((s, i) => (
+                      <li key={`in-${i}`}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {details.outputs?.length ? (
+                <div className="intel-detail-row">
+                  <h5>{t?.intelOutputs || "Outputs"}</h5>
+                  <ul className="intel-io-list">
+                    {details.outputs.map((s, i) => (
+                      <li key={`out-${i}`}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </section>
           ) : null}
 
           {apis.length || models.length || services.length || packages.length ? (

@@ -6,10 +6,7 @@ import { Json } from "../../api";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
-import { FlowMap } from "../FlowMap";
-import { MapModal } from "../MapModal";
 import { ProjectMapModal } from "../ProjectMapModal";
-import { seedFlow } from "../../flowSeed";
 import { Markdown } from "../../markdown";
 
 function IngestProgress({ p, t }: { p: Json; t: any }) {
@@ -51,13 +48,7 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
 
   const [skillSearch, setSkillSearch] = useState("");
 
-  const [mapProjectId, setMapProjectId] = useState<string | null>(null);
-  const [mapNodes, setMapNodes] = useState<any[]>([]);
-  const [mapEdges, setMapEdges] = useState<any[]>([]);
-  const [mapSaving, setMapSaving] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
-
-  // Project Intelligence map (scan-driven). Independent of the manual flow map.
+  // Project Intelligence map (scan-driven).
   const [intelProject, setIntelProject] = useState<{ id: string; name: string } | null>(null);
 
   // Which project summaries are expanded (per project id).
@@ -71,31 +62,6 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
     });
 
   const { page, setPage, pageCount, visible } = usePaged(projects, 6);
-
-  async function openMap(p: Json) {
-    const id = String(p.id);
-    setMapReady(false);
-    setMapProjectId(id);
-    const saved = await g.loadMap(id, "project");
-    if (saved && Array.isArray(saved.nodes) && saved.nodes.length) {
-      setMapNodes(saved.nodes as any[]);
-      setMapEdges(Array.isArray(saved.edges) ? (saved.edges as any[]) : []);
-      setMapReady(true);
-      return;
-    }
-    const projSkills = g.skills.filter((s) =>
-      Array.isArray(p.skillIds) ? (p.skillIds as string[]).includes(String(s.id)) : false
-    );
-    const { nodes, edges } = seedFlow("project", {
-      name: p.name,
-      stack: p.stack,
-      description: p.description,
-      skills: projSkills
-    });
-    setMapNodes(nodes);
-    setMapEdges(edges);
-    setMapReady(true);
-  }
 
   async function createProject() {
     await g.createProject({
@@ -332,12 +298,12 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
                     </button>
                     <button
                       className="ghost sm"
-                      onClick={() => g.startScan(id, { ai: false })}
-                      disabled={!repoUrl || !!loading[`scan-${id}`] || mapBuilding || ["queued", "scanning", "analyzing"].includes(String(p.scanStatus || ""))}
+                      onClick={() => g.startScan(id, { ai: true })}
+                      disabled={!repoUrl || !!loading[`scan-${id}`]}
                       title={!repoUrl ? t.scanMapHint || t.scanNeedsRepo || "Connect a repository first" : undefined}
                       aria-label={t.buildMap || "Build map"}
                     >
-                      <Icon name="search" /> {mapBuilding ? t.mapBuilding || "Building\u2026" : mapStatus === "ready" ? t.rescanBtn || "Rebuild map" : t.buildMap || "Build map"}
+                      <Icon name="search" /> {loading[`scan-${id}`] ? t.mapBuilding || "Building\u2026" : mapStatus === "ready" ? t.rescanBtn || "Rebuild map" : t.buildMap || "Build map"}
                     </button>
                     <button
                       className="ghost sm"
@@ -346,9 +312,6 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
                       aria-label={t.openMap || "Open map"}
                     >
                       <Icon name="overview" /> {t.openMap || "Open map"}
-                    </button>
-                    <button className="ghost sm" onClick={() => openMap(p)} aria-label={t.mapBtn}>
-                      <Icon name="plan" /> {t.mapBtn}
                     </button>
                     <button className="ghost sm" onClick={() => startEdit(p)} aria-label={t.edit}>
                       <Icon name="edit" /> {t.edit}
@@ -439,30 +402,6 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
         ) : null}
       </div>
       <ResultView k="projectCreate" output={output} loading={loading} t={t} />
-
-      <MapModal
-        open={!!mapProjectId}
-        title={t.projectMapTitle}
-        onClose={() => setMapProjectId(null)}
-        closeLabel={t.closeMap}
-      >
-        {mapReady && mapProjectId ? (
-          <FlowMap
-            initialNodes={mapNodes as any}
-            initialEdges={mapEdges as any}
-            t={t}
-            saving={mapSaving}
-            onSave={async (nodes, edges) => {
-              setMapSaving(true);
-              try {
-                await g.saveMap(mapProjectId, "project", nodes as any, edges as any);
-              } finally {
-                setMapSaving(false);
-              }
-            }}
-          />
-        ) : null}
-      </MapModal>
 
       {intelProject ? (
         <ProjectMapModal

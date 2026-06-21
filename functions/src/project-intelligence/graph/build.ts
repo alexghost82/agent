@@ -232,6 +232,43 @@ export function buildGraph(input: BuildGraphInput): BuiltGraph {
     addEdge(s, t, type, layers);
   }
 
+  // ---- Aggregated logical edges (module ↔ module, feature ↔ feature) -------
+  // The file→file imports above only surface on the (dense) Code layer. Roll
+  // them up to their owning module / feature so the higher-level layers actually
+  // show WHICH part depends on which — and in which direction — instead of a
+  // bare project→feature→module hierarchy. Direction = source imports target,
+  // i.e. the arrow points from the dependent to its dependency.
+  const MAX_MODULE_EDGES = 240;
+  const MAX_FEATURE_EDGES = 120;
+  const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) || 0) + 1);
+  const moduleDeps = new Map<string, number>();
+  const featureDeps = new Map<string, number>();
+  for (const e of input.graph.fileEdges) {
+    const mf = moduleId.get(moduleKey(e.from));
+    const mt = moduleId.get(moduleKey(e.to));
+    if (mf && mt && mf !== mt) bump(moduleDeps, `${mf}\u0000${mt}`);
+    const ff = featureByPath.get(e.from);
+    const ft = featureByPath.get(e.to);
+    if (ff && ft && ff !== ft) bump(featureDeps, `${ff}\u0000${ft}`);
+  }
+  const pushAggregated = (deps: Map<string, number>, cap: number, layers: LayerId[]) => {
+    const top = [...deps.entries()].sort((a, b) => b[1] - a[1]).slice(0, cap);
+    for (const [key, weight] of top) {
+      const [src, tgt] = key.split("\u0000");
+      edges.push({
+        id: `e-${edgeSeq++}`,
+        source: src,
+        target: tgt,
+        type: "depends_on",
+        // Weight = number of underlying imports, a hint at how strong the link is.
+        label: weight > 1 ? `depends on \u00d7${weight}` : "depends on",
+        layers
+      });
+    }
+  };
+  pushAggregated(moduleDeps, MAX_MODULE_EDGES, ["architecture", "feature"]);
+  pushAggregated(featureDeps, MAX_FEATURE_EDGES, ["overview", "architecture", "feature"]);
+
   // ---- External packages ----------------------------------------------------
   const ext = Array.from(input.graph.externalUsage.entries())
     .map(([name, set]) => ({ name, files: Array.from(set) }))

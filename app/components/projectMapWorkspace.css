@@ -1,0 +1,345 @@
+/* Project Intelligence Map — interactive technical workspace.
+   Dark workspace chrome layered on top of the existing `.intel-*` renderer.
+   Everything is scoped under `.pmw` so it never affects other surfaces, and it
+   forces a dark scheme (independent of the app light/dark theme) to match the
+   reference. Reuses the global --dm-* (design-map) + --nt-* (node-type) tokens
+   already defined in styles.css. */
+
+.pmw {
+  --pmw-bg: var(--dm-canvas, #0f1115);
+  --pmw-bg-2: var(--dm-canvas-2, #14161c);
+  --pmw-surface: var(--dm-surface, #181b22);
+  --pmw-surface-2: var(--dm-surface-2, #1f232c);
+  --pmw-border: var(--dm-border, rgba(255, 255, 255, 0.08));
+  --pmw-border-strong: var(--dm-border-strong, rgba(255, 255, 255, 0.16));
+  --pmw-text: var(--dm-text, #e6e6e6);
+  --pmw-muted: var(--dm-muted, #9aa3b2);
+  --pmw-accent: var(--dm-accent, #6c8cff);
+
+  position: relative;
+  background: var(--pmw-bg);
+  color: var(--pmw-text);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--pmw-border);
+  min-height: 540px;
+}
+
+/* ----------------------------- header toolbar ---------------------------- */
+.pmw .pmw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, var(--pmw-bg-2), var(--pmw-bg));
+  border-bottom: 1px solid var(--pmw-border);
+}
+.pmw .pmw-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.pmw .pmw-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+.pmw .pmw-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pmw .intel-layer-btn {
+  background: var(--pmw-surface);
+  border: 1px solid var(--pmw-border);
+  color: var(--pmw-muted);
+}
+.pmw .intel-layer-btn.on {
+  background: var(--pmw-accent);
+  border-color: var(--pmw-accent);
+  color: #fff;
+}
+
+.pmw .pmw-search input {
+  background: var(--pmw-bg);
+  border: 1px solid var(--pmw-border);
+  color: var(--pmw-text);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 13px;
+  min-width: 200px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.pmw .pmw-search { flex: 1 1 auto; min-width: 0; }
+.pmw .pmw-search input::placeholder { color: var(--pmw-muted); }
+.pmw .pmw-search input:focus {
+  border-color: var(--pmw-accent);
+  box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.25);
+}
+
+.pmw .pmw-btn,
+.pmw .pmw-toggle {
+  background: var(--pmw-surface);
+  border: 1px solid var(--pmw-border);
+  color: var(--pmw-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 11px;
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.1s ease;
+}
+.pmw .pmw-btn:hover,
+.pmw .pmw-toggle:hover { border-color: var(--pmw-accent); background: var(--pmw-surface-2); }
+.pmw .pmw-btn:active { transform: scale(0.96); }
+.pmw .pmw-btn.primary { background: var(--pmw-accent); border-color: var(--pmw-accent); color: #fff; }
+.pmw .pmw-toggle.on { border-color: var(--pmw-accent); color: #fff; background: rgba(108, 140, 255, 0.18); }
+
+/* ----------------------------- filter chips ------------------------------ */
+.pmw .pmw-filters {
+  background: var(--pmw-bg-2);
+  border-bottom: 1px solid var(--pmw-border);
+}
+.pmw .intel-chip {
+  background: var(--pmw-surface);
+  border: 1px solid var(--pmw-border);
+  color: var(--pmw-text);
+}
+.pmw .intel-chip.off { opacity: 0.4; }
+
+/* -------------------------------- body grid ------------------------------ */
+.pmw .pmw-body {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+}
+
+/* Glass side panels */
+.pmw .pmw-help,
+.pmw .pmw-summary {
+  flex: 0 0 264px;
+  width: 264px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: rgba(20, 22, 28, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.pmw .pmw-help { border-right: 1px solid var(--pmw-border); }
+.pmw .pmw-summary { border-left: 1px solid var(--pmw-border); }
+.pmw .pmw-help h4,
+.pmw .pmw-summary h4 { margin: 0 0 8px; font-size: 14px; }
+.pmw .pmw-help h5,
+.pmw .pmw-summary h5 {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pmw-muted);
+}
+.pmw .pmw-muted { color: var(--pmw-muted); font-size: 12.5px; line-height: 1.55; }
+
+.pmw .pmw-legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pmw .pmw-legend-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.pmw .pmw-layer-dot,
+.pmw .pmw-type-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  background: var(--pmw-muted);
+}
+.pmw .pmw-layer-dot.layer-overview { background: #6c8cff; }
+.pmw .pmw-layer-dot.layer-architecture { background: #38bdf8; }
+.pmw .pmw-layer-dot.layer-code { background: #2dd4bf; }
+.pmw .pmw-layer-dot.layer-feature { background: #22c55e; }
+.pmw .pmw-layer-dot.layer-dataFlow { background: #f59e0b; }
+.pmw .pmw-layer-dot.layer-uiFlow { background: #a78bfa; }
+.pmw .pmw-layer-dot.layer-risk { background: #f87171; }
+
+.pmw .pmw-type-dot.type-project { background: var(--nt-project, #8b5cf6); }
+.pmw .pmw-type-dot.type-feature { background: var(--nt-feature, #22c55e); }
+.pmw .pmw-type-dot.type-module { background: var(--nt-module, #38bdf8); }
+.pmw .pmw-type-dot.type-apiRoute { background: var(--nt-apiRoute, #f59e0b); }
+.pmw .pmw-type-dot.type-service { background: var(--nt-service, #06b6d4); }
+.pmw .pmw-type-dot.type-dbModel { background: var(--nt-dbModel, #ec4899); }
+.pmw .pmw-type-dot.type-component { background: var(--nt-component, #2dd4bf); }
+.pmw .pmw-type-dot.type-worker { background: var(--nt-worker, #eab308); }
+.pmw .pmw-type-dot.type-config { background: var(--nt-config, #94a3b8); }
+.pmw .pmw-type-dot.type-test { background: var(--nt-test, #f472b6); }
+.pmw .pmw-type-dot.type-documentation { background: var(--nt-documentation, #60a5fa); }
+.pmw .pmw-type-dot.type-file { background: var(--nt-file, #9aa3b2); }
+.pmw .pmw-type-dot.type-externalPackage { background: var(--nt-externalPackage, #a78bfa); }
+.pmw .pmw-type-dot.type-firebaseFunction { background: var(--nt-firebaseFunction, #f59e0b); }
+.pmw .pmw-type-dot.type-firestoreCollection { background: var(--nt-firestoreCollection, #ec4899); }
+
+/* ------------------------------- canvas ---------------------------------- */
+.pmw .pmw-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  background:
+    linear-gradient(var(--pmw-border) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(90deg, var(--pmw-border) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--pmw-bg);
+}
+.pmw .react-flow__background { color: var(--pmw-border); }
+.pmw .react-flow__controls button {
+  background: var(--pmw-surface);
+  border-bottom: 1px solid var(--pmw-border);
+  fill: var(--pmw-text);
+  color: var(--pmw-text);
+}
+.pmw .react-flow__minimap {
+  background: var(--pmw-bg-2);
+  border: 1px solid var(--pmw-border);
+  border-radius: 8px;
+}
+
+/* Dark technical cards for the typed nodes. */
+.pmw .intel-node {
+  background: var(--pmw-surface);
+  color: var(--pmw-text);
+  border-color: var(--pmw-border-strong);
+  border-left-width: 5px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.pmw .intel-node .intel-node-type { color: var(--pmw-muted); }
+.pmw .intel-node.match { box-shadow: 0 0 0 2px var(--pmw-accent), 0 6px 18px rgba(0, 0, 0, 0.35); }
+.pmw .react-flow__edge.intel-edge .react-flow__edge-path { stroke: var(--pmw-border-strong); }
+.pmw .react-flow__edge-text { fill: var(--pmw-muted); }
+
+/* Aggregated logical dependency edges (module ↔ module, feature ↔ feature):
+   accent-coloured + slightly thicker so the "A depends on B" flow stands out
+   from the structural ownership edges. */
+.pmw .react-flow__edge.type-depends_on .react-flow__edge-path { stroke: var(--pmw-accent); stroke-width: 1.75px; }
+.pmw .react-flow__edge.type-depends_on .react-flow__edge-text { fill: var(--pmw-accent); font-weight: 600; }
+.pmw .react-flow__edge.type-depends_on .react-flow__edge-text-bg { fill: var(--pmw-bg-2); }
+
+.pmw .intel-empty-layer { color: var(--pmw-muted); }
+
+/* ------------------------------ summary ---------------------------------- */
+.pmw .pmw-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.pmw .pmw-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--pmw-surface);
+  border: 1px solid var(--pmw-border);
+  border-radius: 9px;
+}
+.pmw .pmw-stat-value { font-size: 19px; font-weight: 700; line-height: 1; }
+.pmw .pmw-stat-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pmw-muted); }
+
+.pmw .pmw-section { margin-top: 14px; border-top: 1px solid var(--pmw-border); padding-top: 10px; }
+.pmw .pmw-summary-text { font-size: 12.5px; line-height: 1.55; color: var(--pmw-text); white-space: pre-wrap; }
+.pmw .pmw-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.pmw .pmw-tag {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--pmw-surface-2);
+  border: 1px solid var(--pmw-border);
+  color: var(--pmw-text);
+}
+.pmw .pmw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pmw .pmw-list li { font-size: 12.5px; padding: 4px 8px; background: var(--pmw-surface); border: 1px solid var(--pmw-border); border-radius: 7px; }
+.pmw .pmw-risk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pmw .pmw-risk-list li {
+  background: var(--pmw-surface);
+  border: 1px solid var(--pmw-border);
+  border-left: 4px solid var(--pmw-muted);
+  border-radius: 7px;
+  padding: 6px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pmw .pmw-risk-list li b { font-size: 12px; }
+.pmw .pmw-risk-list li span { font-size: 12px; color: var(--pmw-muted); }
+.pmw .pmw-risk-list li.sev-warning { border-left-color: #f59e0b; }
+.pmw .pmw-risk-list li.sev-critical { border-left-color: #ef4444; }
+
+/* --------------------- node detail "Read more" drawer -------------------- */
+.pmw .pmw-detail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(380px, 90%);
+  z-index: 6;
+  box-shadow: -12px 0 30px rgba(0, 0, 0, 0.45);
+  animation: pmw-slide-in 0.18s ease;
+}
+@keyframes pmw-slide-in {
+  from { transform: translateX(12px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.pmw .pmw-detail .intel-sidebar {
+  width: 100%;
+  flex: 1 1 auto;
+  height: 100%;
+  background: rgba(24, 27, 34, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left: 1px solid var(--pmw-border-strong);
+  color: var(--pmw-text);
+}
+
+/* New detail sub-sections rendered by NodeDetailSidebar. */
+.intel-details { margin-top: 12px; }
+.intel-detail-row { margin-top: 10px; }
+.intel-detail-row h5 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted-2); }
+.intel-detail-row p { margin: 0; font-size: 12.5px; line-height: 1.5; }
+.intel-io-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.intel-io-list li { font-size: 11.5px; color: var(--muted); word-break: break-word; }
+
+/* ------------------------------ responsive ------------------------------- */
+@media (max-width: 1100px) {
+  .pmw .pmw-help,
+  .pmw .pmw-summary { flex-basis: 220px; width: 220px; }
+}
+@media (max-width: 860px) {
+  /* Mobile fallback: panels stack above the canvas and the detail drawer
+     becomes a full-width sheet. The map stays usable on small screens. */
+  .pmw .pmw-body { flex-direction: column; }
+  .pmw .pmw-help,
+  .pmw .pmw-summary {
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 220px;
+    border: 0;
+    border-bottom: 1px solid var(--pmw-border);
+  }
+  .pmw .pmw-canvas { min-height: 380px; }
+  .pmw .pmw-detail { width: 100%; }
+  .pmw .pmw-toolbar-actions { width: 100%; justify-content: flex-start; }
+}
