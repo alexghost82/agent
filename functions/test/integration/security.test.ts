@@ -266,7 +266,13 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: contract §1 security & obser
 
     it("assigns a correlation id per request and honours an inbound X-Request-Id", () => {
       const headers: Record<string, string> = {};
-      const makeRes = () => ({ setHeader: (k: string, v: string) => (headers[k] = v) });
+      const makeRes = () => ({
+        setHeader: (k: string, v: string) => (headers[k] = v),
+        // The requestId middleware registers a `finish` listener to emit latency
+        // metrics; a real Express response is an EventEmitter, so the mock must
+        // expose `on` (the actual metric flush only fires on the real `finish`).
+        on: () => {}
+      });
 
       const generated = { headers: {} } as any;
       let next1 = false;

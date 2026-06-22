@@ -37,6 +37,7 @@ import { buildRouter } from "../../src/routes/build";
 import { memoryRouter } from "../../src/routes/memory";
 import { askRouter } from "../../src/routes/ask";
 import { designRouter } from "../../src/routes/design";
+import { designMapRouter } from "../../src/routes/designMap";
 import { plansRouter } from "../../src/routes/plans";
 import { dashboardRouter } from "../../src/routes/dashboard";
 import { keysRouter } from "../../src/routes/keys";
@@ -93,6 +94,7 @@ export function buildApp(): express.Express {
   app.use(memoryRouter);
   app.use(askRouter);
   app.use(designRouter);
+  app.use(designMapRouter);
   app.use(plansRouter);
   app.use(dashboardRouter);
   app.use(keysRouter);
