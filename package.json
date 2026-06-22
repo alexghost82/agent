@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "firebase:emulators": "npx -y firebase-tools@latest emulators:start",
     "deploy": "npx -y firebase-tools@latest deploy",
     "typecheck": "tsc --noEmit",
