@@ -307,11 +307,39 @@ export function resolveCrawlUrl(href: string, base: string): string | null {
 
 export type VectorBackend = "memory" | "firestore";
 
-// Pure selector so the backend choice is unit-testable without Firestore. Only
-// the explicit "firestore" value opts into Vector Search; everything else
-// (including unset) keeps the emulator-safe in-memory cosine default.
-export function selectVectorBackend(env: string | undefined): VectorBackend {
-  return env === "firestore" ? "firestore" : "memory";
+// Runtime context for backend selection. `emulator` is true when running under
+// the Firestore emulator (which has no `findNearest`), so we must stay on the
+// in-memory cosine path there.
+export interface VectorBackendContext {
+  emulator?: boolean;
+}
+
+// Pure selector so the backend choice is unit-testable without Firestore.
+//
+// New default semantics (CONTRACT v3.2, updated): Firestore Vector Search is now
+// the DEFAULT backend. Resolution order:
+//   1. Explicit `VECTOR_BACKEND=memory`   → "memory"  (operator opt-out)
+//   2. Explicit `VECTOR_BACKEND=firestore`→ "firestore"
+//   3. Under the emulator                 → "memory"  (no findNearest support)
+//   4. Anything else, incl. unset env     → "firestore" (the new default)
+//
+// The runtime context is OPTIONAL. When it is omitted entirely the selector
+// falls back to the conservative legacy mapping (only an explicit "firestore"
+// opts in, everything else → "memory"). This keeps the function safe to call as
+// a pure string→backend map (e.g. unit tests) while production passes a context
+// so the new "default to firestore unless emulator" policy applies.
+export function selectVectorBackend(
+  env: string | undefined,
+  ctx?: VectorBackendContext
+): VectorBackend {
+  if (env === "memory") return "memory";
+  if (env === "firestore") return "firestore";
+  // No runtime context → conservative pure mapping (emulator-safe default).
+  if (!ctx) return "memory";
+  // The emulator cannot serve findNearest; never auto-select firestore there.
+  if (ctx.emulator) return "memory";
+  // Unset / unrecognised value in a real runtime → new firestore default.
+  return "firestore";
 }
 
 // --- Skill v2 quality validation (CONTRACT v3.3) ---------------------------

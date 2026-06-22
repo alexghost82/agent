@@ -34,9 +34,20 @@ function candidateCap(): number {
   return Number.isFinite(n) && n > 0 ? n : 1500;
 }
 
-class InMemoryCosineIndex implements VectorIndex {
+export class InMemoryCosineIndex implements VectorIndex {
   async search(query: string, scope: SearchScope, limit: number): Promise<ScoredChunk[]> {
     const qEmbedding = await embedding(query, scope.userId);
+    return this.searchWithEmbedding(qEmbedding, scope, limit);
+  }
+
+  // Scores candidates against an already-computed query embedding. Split out so
+  // callers that already have the query vector (e.g. the Firestore backend's
+  // runtime fallback) don't pay for a second embedding round-trip.
+  async searchWithEmbedding(
+    qEmbedding: number[],
+    scope: SearchScope,
+    limit: number
+  ): Promise<ScoredChunk[]> {
     let q: FirebaseFirestore.Query = db.collection("knowledge_chunks").where("userId", "==", scope.userId);
     if (scope.topicId) q = q.where("topicId", "==", scope.topicId);
     if (scope.projectId) q = q.where("projectId", "==", scope.projectId);
@@ -64,28 +75,69 @@ class InMemoryCosineIndex implements VectorIndex {
   }
 }
 
-// Firestore Vector Search backend (CONTRACT v3.2). Selected with
-// VECTOR_BACKEND="firestore". Uses `findNearest`, so recall is NOT bounded by
-// VECTOR_CANDIDATE_CAP. Requires the `embedding` vector field override in
-// firestore.indexes.json and embeddings stored as Firestore vector values.
-// Not exercised by the Firestore emulator (which lacks findNearest); the
-// in-memory backend remains the default and the tested path.
-class FirestoreVectorIndex implements VectorIndex {
-  async search(query: string, scope: SearchScope, limit: number): Promise<ScoredChunk[]> {
-    const qEmbedding = await embedding(query, scope.userId);
+// Field that `findNearest` writes the computed distance into for each returned
+// doc. Must not collide with a real chunk field; `vector_distance` is the name
+// used in the Firestore docs and is safe (not a reserved `__…__` field).
+const DISTANCE_FIELD = "vector_distance";
+
+// True when running against the Firestore emulator, which does NOT implement
+// `findNearest`. We detect either the Functions emulator marker or an explicit
+// emulator host so the in-memory cosine path is selected automatically.
+export function isEmulator(): boolean {
+  return !!(process.env.FUNCTIONS_EMULATOR || process.env.FIRESTORE_EMULATOR_HOST);
+}
+
+// Firestore Vector Search backend (CONTRACT v3.2). Now the DEFAULT backend in
+// real runtimes (see `selectVectorBackend`). Uses `findNearest`, so recall is
+// NOT bounded by VECTOR_CANDIDATE_CAP. Requires the `embedding` vector field
+// override in firestore.indexes.json and embeddings stored as Firestore vector
+// values. The Firestore emulator lacks findNearest, so it is never auto-selected
+// there; if a findNearest query still throws at runtime (index not ready /
+// unsupported) we fall back to the in-memory cosine path for that request so
+// retrieval never hard-fails.
+export class FirestoreVectorIndex implements VectorIndex {
+  private readonly fallback = new InMemoryCosineIndex();
+
+  // Seam: embeds the query string. Isolated so tests can drive the fallback
+  // logic deterministically without a live embedding provider.
+  protected embedQuery(query: string, userId: string): Promise<number[]> {
+    return embedding(query, userId);
+  }
+
+  // Seam: the actual vector query. Isolated so tests can simulate a findNearest
+  // failure (index not ready / emulator) and assert the fallback path.
+  protected async runFindNearest(
+    qEmbedding: number[],
+    scope: SearchScope,
+    limit: number
+  ): Promise<ScoredChunk[]> {
     let q: FirebaseFirestore.Query = db.collection("knowledge_chunks").where("userId", "==", scope.userId);
     if (scope.topicId) q = q.where("topicId", "==", scope.topicId);
     if (scope.projectId) q = q.where("projectId", "==", scope.projectId);
 
     // `findNearest` is available on the Admin SDK Query; cast keeps this
     // compiling across SDK minor versions without pinning the vector types.
+    // `distanceResultField` makes the SDK surface the COSINE distance per doc.
     const vectorQuery = (q as unknown as {
-      findNearest(opts: { vectorField: string; queryVector: number[]; limit: number; distanceMeasure: "COSINE" }): FirebaseFirestore.Query;
-    }).findNearest({ vectorField: "embedding", queryVector: qEmbedding, limit, distanceMeasure: "COSINE" });
+      findNearest(opts: {
+        vectorField: string;
+        queryVector: number[];
+        limit: number;
+        distanceMeasure: "COSINE";
+        distanceResultField?: string;
+      }): FirebaseFirestore.Query;
+    }).findNearest({
+      vectorField: "embedding",
+      queryVector: qEmbedding,
+      limit,
+      distanceMeasure: "COSINE",
+      distanceResultField: DISTANCE_FIELD
+    });
 
     const snap = await vectorQuery.get();
     return snap.docs.map((doc) => {
       const data = doc.data();
+      const distance = data[DISTANCE_FIELD];
       return {
         id: doc.id,
         sourceUrl: data.sourceUrl,
@@ -94,18 +146,37 @@ class FirestoreVectorIndex implements VectorIndex {
         content: data.content,
         chunkType: data.chunkType,
         scope: data.scope,
-        // Distance is not returned uniformly across SDK versions; expose 0 as a
-        // neutral score since callers rank by retrieval order here.
-        score: 0
+        // Firestore COSINE distance ∈ [0,2]; similarity = 1 - distance preserves
+        // the same "higher = closer" ordering as InMemoryCosineIndex. When the
+        // SDK does not surface a distance we fall back to a neutral 0 score and
+        // rely on retrieval order.
+        score: typeof distance === "number" ? 1 - distance : 0
       };
     });
   }
+
+  async search(query: string, scope: SearchScope, limit: number): Promise<ScoredChunk[]> {
+    const qEmbedding = await this.embedQuery(query, scope.userId);
+    try {
+      return await this.runFindNearest(qEmbedding, scope, limit);
+    } catch (err) {
+      // Graceful per-request degradation: index not ready, unsupported, or a
+      // transient vector-query error must not hard-fail retrieval.
+      log("warn", "vector_findnearest_fallback_inmemory", {
+        userId: scope.userId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+      return this.fallback.searchWithEmbedding(qEmbedding, scope, limit);
+    }
+  }
 }
 
-function makeIndex(): VectorIndex {
-  return selectVectorBackend(process.env.VECTOR_BACKEND) === "firestore"
-    ? new FirestoreVectorIndex()
-    : new InMemoryCosineIndex();
+// Picks the backend per the (now firestore-default) selection policy, with the
+// emulator auto-falling back to the in-memory cosine index.
+export function makeIndex(): VectorIndex {
+  const backend = selectVectorBackend(process.env.VECTOR_BACKEND, { emulator: isEmulator() });
+  log("info", "vector_backend_selected", { backend, emulator: isEmulator() });
+  return backend === "firestore" ? new FirestoreVectorIndex() : new InMemoryCosineIndex();
 }
 
 const index: VectorIndex = makeIndex();
