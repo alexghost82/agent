@@ -13,6 +13,52 @@ export type AiProvider = "openai" | "gemini" | "anthropic" | "azure-openai";
 // calls fall back to an embedding-capable provider (CONTRACT v3.7).
 const EMBEDDING_CAPABLE: ReadonlySet<AiProvider> = new Set<AiProvider>(["openai", "gemini", "azure-openai"]);
 
+// Canonical embedding dimension (ADR-0008). Firestore Vector Search needs ONE
+// fixed dimension across the whole index, but providers emit different sizes
+// (OpenAI/Azure text-embedding-3-small = 1536, Gemini text-embedding-004 = 768).
+// Every embedding is normalized to this dimension before it is stored or used as
+// a query vector, so all vectors are index-compatible regardless of provider.
+// This value MUST equal the `dimension` declared for `knowledge_chunks.embedding`
+// in firestore.indexes.json.
+export const TARGET_EMBED_DIM = Number(process.env.TARGET_EMBED_DIM) || 1536;
+
+// Maps a provider embedding of ANY dimension to a canonical `targetDim` vector
+// (ADR-0008), then L2-renormalizes so cosine similarity stays meaningful and
+// comparable across providers:
+//   - len > targetDim → deterministic average-pool (block mean) so every input
+//     coordinate contributes (chosen over truncation, which drops the tail);
+//   - len < targetDim → zero-pad;
+//   - len === targetDim → unchanged copy.
+// Pure and deterministic (no I/O). L2-renorm is scale-invariant, so it preserves
+// cosine and is a no-op for already-unit-norm providers (e.g. OpenAI). A genuine
+// zero vector (norm 0) is returned as-is to avoid NaN.
+export function normalizeEmbedding(vec: number[], targetDim: number = TARGET_EMBED_DIM): number[] {
+  const dim = Math.max(1, Math.floor(targetDim));
+  let out: number[];
+  if (vec.length === dim) {
+    out = vec.slice();
+  } else if (vec.length > dim) {
+    out = new Array<number>(dim).fill(0);
+    for (let i = 0; i < dim; i++) {
+      const lo = Math.floor((i * vec.length) / dim);
+      const hi = Math.max(Math.floor(((i + 1) * vec.length) / dim), lo + 1);
+      let sum = 0;
+      for (let j = lo; j < hi; j++) sum += vec[j] || 0;
+      out[i] = sum / (hi - lo);
+    }
+  } else {
+    out = new Array<number>(dim).fill(0);
+    for (let i = 0; i < vec.length; i++) out[i] = vec[i];
+  }
+
+  let norm = 0;
+  for (let i = 0; i < out.length; i++) norm += out[i] * out[i];
+  norm = Math.sqrt(norm);
+  if (norm === 0) return out;
+  for (let i = 0; i < out.length; i++) out[i] /= norm;
+  return out;
+}
+
 interface Resolved {
   provider: AiProvider;
   apiKey: string;
@@ -103,7 +149,11 @@ function dispatchEmbeddingBatch(provider: AiProvider, apiKey: string, inputs: st
 
 export async function embedding(input: string, userId: string): Promise<number[]> {
   const { provider, apiKey } = await resolveEmbedding(userId);
-  return dispatchEmbedding(provider, apiKey, input);
+  const raw = await dispatchEmbedding(provider, apiKey, input);
+  // Canonicalize to TARGET_EMBED_DIM so every stored/queried vector matches the
+  // single fixed dimension of the Firestore vector index, regardless of provider
+  // (ADR-0008). This is the single funnel for both ingestion and query paths.
+  return normalizeEmbedding(raw, TARGET_EMBED_DIM);
 }
 
 // Batch embeddings: a single provider call for many inputs. Resolves the key
@@ -111,7 +161,8 @@ export async function embedding(input: string, userId: string): Promise<number[]
 export async function embeddingBatch(inputs: string[], userId: string): Promise<number[][]> {
   if (!inputs.length) return [];
   const { provider, apiKey } = await resolveEmbedding(userId);
-  return dispatchEmbeddingBatch(provider, apiKey, inputs);
+  const raw = await dispatchEmbeddingBatch(provider, apiKey, inputs);
+  return raw.map((v) => normalizeEmbedding(v, TARGET_EMBED_DIM));
 }
 
 export async function llm(
