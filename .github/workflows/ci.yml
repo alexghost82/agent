@@ -94,3 +94,39 @@ jobs:
             exit 1
           fi
           echo "No secrets detected."
+
+  commit-lint:
+    # Enforces Conventional Commits on every commit message. This is a MANDATORY
+    # gate: any non-conventional commit message fails the build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so we can lint the whole PR/push commit range.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install root deps
+        run: npm install
+      - name: Validate PR commit messages
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --prune origin "${{ github.base_ref }}"
+          npx --no-install commitlint \
+            --from "origin/${{ github.base_ref }}" \
+            --to "HEAD" \
+            --verbose
+      - name: Validate pushed commit messages
+        if: github.event_name == 'push'
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # New branch (no "before" ref): validate at least the tip commit.
+            npx --no-install commitlint --last --verbose
+          else
+            npx --no-install commitlint \
+              --from "$BEFORE" \
+              --to "${{ github.event.after }}" \
+              --verbose
+          fi

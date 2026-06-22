@@ -11,7 +11,9 @@
     "deploy": "npx -y firebase-tools@latest deploy",
     "typecheck": "tsc --noEmit",
     "test:web": "vitest run -c vitest.web.config.ts",
-    "check": "npm run typecheck && cd functions && npm run build"
+    "check": "npm run typecheck && cd functions && npm run build",
+    "commitlint": "commitlint",
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@next/env": "~16.2.9",
@@ -22,6 +24,8 @@
     "react-dom": "~19.2.7"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "~25.9.3",
@@ -30,6 +34,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "eslint": "~9.39.4",
     "eslint-config-next": "~16.2.9",
+    "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
