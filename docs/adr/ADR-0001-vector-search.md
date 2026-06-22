@@ -1,8 +1,20 @@
 # ADR-0001 — Vector search: Firestore Vector Search vs external vector DB
 
-- **Status:** Accepted
+- **Status:** Accepted — **Implemented (Firestore Vector Search is now the default backend, with emulator + runtime fallback to in-memory cosine).** See [vector-migration notes](../notes/vector-migration.md).
 - **Owner:** Architect
-- **Affects:** `functions/src/memory.ts`, `functions/src/github.ts`, `functions/src/routes/{ask,design,plans}.ts`, `firestore.indexes.json`
+- **Affects:** `functions/src/memory.ts`, `functions/src/pure.ts`, `functions/src/github.ts`, `functions/src/routes/{ask,design,plans}.ts`, `firestore.indexes.json`
+
+> **Status update (feature/vector-backend):** the decision below is implemented.
+> `findNearest` (Firestore Vector Search) is the **default** backend in real
+> runtimes; `selectVectorBackend` resolves explicit `VECTOR_BACKEND=memory` /
+> `=firestore`, auto-falls back to the in-memory cosine index under the Firestore
+> emulator (no `findNearest` support), and otherwise defaults to firestore. A
+> `findNearest` failure (index not `READY` / unsupported) is caught and served
+> from the in-memory path for that request, so retrieval never hard-fails. The
+> Firestore backend now surfaces a real COSINE similarity score
+> (`1 - distance`). The embedding **dimension is still an open question** — it is
+> provider-dependent (OpenAI/Azure 1536, Gemini 768) and pinned in
+> `firestore.indexes.json` (currently 1536); see the migration notes.
 
 ## Context
 
@@ -43,16 +55,23 @@ Re-evaluate if memory size or QPS outgrows Firestore Vector Search limits.
   dimension becomes a frozen contract value; back-population of existing chunks
   needed.
 - **Migration:** existing chunks already store `embedding`; once the vector index
-  is `READY`, switch `searchMemory` to `findNearest`. No data reshape required if
-  the stored dimension matches the index.
+  is `READY`, `searchMemory` uses `findNearest` by default. No data reshape
+  required if the stored dimension matches the index **and** embeddings are
+  stored as Firestore vector values (plain arrays are ignored by the index — see
+  the migration notes). Until the index is `READY`, the runtime fallback keeps
+  retrieval working from the in-memory path.
 
 ## Impact on files
 
-- `functions/src/memory.ts` — replace the `limit(1500)` + in-memory sort with a
-  `findNearest(...)` vector query (Backend).
-- `firestore.indexes.json` — Architect adds the vector index/`fieldOverride` for
-  `knowledge_chunks.embedding` (dimension + distance measure `COSINE`) once the
-  embedding dimension is confirmed. **Open question:** confirm embedding dimension
-  from the active provider before pinning the index.
+- `functions/src/memory.ts` — **done.** `FirestoreVectorIndex` issues
+  `findNearest(... distanceMeasure: "COSINE", distanceResultField: "vector_distance")`
+  and is the default backend; `InMemoryCosineIndex` remains as the emulator and
+  runtime fallback. (Backend)
+- `functions/src/pure.ts` — **done.** `selectVectorBackend` implements the
+  firestore-default-with-emulator-fallback policy (kept pure/unit-testable).
+- `firestore.indexes.json` — vector `fieldOverride` + composite vector indexes
+  for `knowledge_chunks.embedding` are declared. **Open question (still open):**
+  confirm/standardise the embedding dimension from the active provider; it is
+  pinned at 1536 today and cannot be templated per provider.
 - Callers (`ask.ts`, `design.ts`, `plans.ts`, `github.ts`) are unaffected — the
   `searchMemory(query, scope, limit)` signature stays stable.
