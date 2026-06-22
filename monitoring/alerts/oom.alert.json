@@ -1,0 +1,30 @@
+{
+  "displayName": "api — OOM / memory-limit exceeded",
+  "combiner": "OR",
+  "severity": "CRITICAL",
+  "conditions": [
+    {
+      "displayName": "OOM log signatures on Cloud Run service api",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"api\" severity>=WARNING (textPayload=~\"Memory limit of .* exceeded\" OR textPayload=~\"Reached heap limit\" OR textPayload=~\"JavaScript heap out of memory\" OR textPayload=~\"SIGABRT\" OR textPayload=~\"signal: killed\" OR jsonPayload.event=\"oom\")",
+        "labelExtractors": {
+          "revision": "EXTRACT(resource.labels.revision_name)"
+        }
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": {
+      "period": "300s"
+    },
+    "autoClose": "1800s"
+  },
+  "notificationChannels": [
+    "${NOTIFICATION_CHANNEL_ID}"
+  ],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "subject": "[CRITICAL] api OOM / memory-limit exceeded",
+    "content": "## Severity: CRITICAL\n\nThe `api` Cloud Run service (Cloud Functions v2) emitted an out-of-memory signature. Common triggers:\n\n- `Memory limit of <N> exceeded` — Cloud Run killed the container (raise memory or reduce per-request footprint).\n- `Reached heap limit` / `JavaScript heap out of memory` — Node V8 heap exhaustion.\n- `SIGABRT` / `signal: killed` — abnormal container termination, frequently memory-driven.\n\n### Why it matters\nOOM kills drop in-flight requests and cold-start the next revision, so this is paired with elevated error rate and latency.\n\n### Runbook\n1. Check memory utilization: `run.googleapis.com/container/memory/utilizations` for service `api` (see the optional companion metric policy in `monitoring/README.md`).\n2. Inspect recent deploys / payload sizes (large ingest, PDF, or vector batches).\n3. Mitigate: raise the function memory limit, then investigate the leak.\n4. Runbook: https://runbooks.internal/${PROJECT_ID}/api-oom (replace with your runbook URL).\n\n### Tuning\nThis is **log-based** and fires immediately — no dependency on Agent I telemetry. To suppress noise, narrow the regexes or raise `notificationRateLimit.period`."
+  }
+}
