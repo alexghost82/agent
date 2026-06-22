@@ -2,6 +2,7 @@ import { db } from "./firebase";
 import { embedding } from "./ai";
 import { cosineSimilarity, selectVectorBackend } from "./pure";
 import { log } from "./log";
+import { startSpan, recordLatency, recordCounter, recordError } from "./telemetry";
 
 export interface SearchScope {
   userId: string;
@@ -56,7 +57,9 @@ export class InMemoryCosineIndex implements VectorIndex {
     const snap = await q.limit(cap).get();
     if (snap.size >= cap) {
       log("warn", "vector_candidate_cap_hit", { userId: scope.userId, cap });
+      recordCounter("vector_candidate_cap_hit_total");
     }
+    recordCounter("vector_search_candidates_total", { backend: "in-memory" }, snap.size);
     const scored = snap.docs.map((doc) => {
       const data = doc.data();
       const emb = data.embedding as number[] | undefined;
@@ -166,6 +169,7 @@ export class FirestoreVectorIndex implements VectorIndex {
         userId: scope.userId,
         error: err instanceof Error ? err.message : String(err)
       });
+      recordCounter("vector_search_fallback_total", { reason: "findnearest_error" });
       return this.fallback.searchWithEmbedding(qEmbedding, scope, limit);
     }
   }
@@ -181,10 +185,42 @@ export function makeIndex(): VectorIndex {
 
 const index: VectorIndex = makeIndex();
 
+// Configured backend label for metric/span attributes. Derived from the module
+// `index` instance so it reflects the selection policy without re-running it.
+const ACTIVE_BACKEND: "firestore" | "in-memory" =
+  index instanceof FirestoreVectorIndex ? "firestore" : "in-memory";
+
 // Always scoped to a single user (data isolation). Optionally narrowed to a
 // topic or project to keep the candidate set small.
+//
+// Instrumented for observability only — retrieval behaviour and the return value
+// are IDENTICAL to a bare `index.search(...)`. We wrap the call in a
+// `vector.search` span (Cloud Trace) and emit dedicated retrieval metrics
+// (latency, throughput, result count) tagged by backend. Note: the per-request
+// in-memory fallback inside FirestoreVectorIndex emits its own
+// `vector_search_fallback_total` counter, so `backend` here is the configured
+// backend, not necessarily the one that served a degraded request.
 export async function searchMemory(query: string, scope: SearchScope, limit = 8): Promise<ScoredChunk[]> {
-  return index.search(query, scope, limit);
+  const started = Date.now();
+  return startSpan(
+    "vector.search",
+    async (span) => {
+      span.setAttribute("vector.limit", limit);
+      try {
+        const results = await index.search(query, scope, limit);
+        span.setAttribute("vector.result_count", results.length);
+        recordLatency("vector_search_ms", Date.now() - started, { backend: ACTIVE_BACKEND });
+        recordCounter("vector_search_total", { backend: ACTIVE_BACKEND });
+        recordCounter("vector_search_results_total", { backend: ACTIVE_BACKEND }, results.length);
+        return results;
+      } catch (err) {
+        recordLatency("vector_search_ms", Date.now() - started, { backend: ACTIVE_BACKEND, error: "1" });
+        recordError(err, { op: "searchMemory", backend: ACTIVE_BACKEND });
+        throw err;
+      }
+    },
+    { "vector.backend": ACTIVE_BACKEND }
+  );
 }
 
 export interface GatherContextOpts {
