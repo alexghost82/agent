@@ -1,4 +1,5 @@
 import { onRequest } from "firebase-functions/v2/https";
+import type { MemoryOption } from "firebase-functions/v2/options";
 import express from "express";
 import type { Response, NextFunction } from "express";
 import cors from "cors";
@@ -120,16 +121,57 @@ app.use((err: unknown, req: AuthedRequest, res: Response, _next: NextFunction) =
   sendError(req, res, err);
 });
 
-// In-process vector search loads many embedding vectors into memory per request,
-// so the default 256 MiB / 80-concurrency config could exceed memory under load
-// (observed: "Memory limit of 256 MiB exceeded", and later a JS-heap OOM crash —
-// "Reached heap limit" / SIGABRT — during topic skill extraction). gatherContext
-// now runs its subqueries sequentially to cut peak memory; on top of that we give
-// the function 2 GiB and keep per-instance concurrency low so two heavy retrieval
-// requests can't stack into an OOM on the same instance. Allow longer LLM calls.
+// --- Runtime sizing -------------------------------------------------------
+// History: in-process vector search loaded many embedding vectors into memory
+// per request, which caused OOM under load ("Memory limit … exceeded", and a
+// JS-heap "Reached heap limit" / SIGABRT during skill extraction). The previous
+// mitigation was 2 GiB + concurrency 8 (few heavy retrievals could stack per
+// instance). gatherContext also runs its subqueries sequentially to cap peak
+// memory at a single candidate set.
+//
+// Now the Firestore Vector Search backend (Agent A, VECTOR_BACKEND="firestore")
+// is the intended default: `findNearest` returns only the top-k chunks
+// server-side, so per-request retrieval memory drops from "a capped candidate
+// set" (up to VECTOR_CANDIDATE_CAP=1500 vectors) to ~k chunks (default 8). That
+// lets us halve memory to 1 GiB and raise concurrency for better throughput and
+// lower cost, while keeping the timeout long enough for LLM calls.
+//
+// IMPORTANT — this tuning ASSUMES the Firestore vector backend. The in-memory
+// cosine fallback still exists per request (memory.ts), and selectVectorBackend
+// returns "memory" unless VECTOR_BACKEND="firestore". 1 GiB (not 512 MiB) is the
+// deliberate floor: it absorbs an OCCASIONAL single in-memory fallback request
+// (one capped candidate set is on the order of tens of MiB) without OOM, but it
+// is NOT sized for SUSTAINED in-memory search at high concurrency. If you force
+// VECTOR_BACKEND=memory, raise FUNCTION_MEMORY back to 2GiB (and/or lower
+// FUNCTION_CONCURRENCY) — see docs/notes/runtime-load-test.md.
+//
+// All three values stay env-overridable for ops tuning without a code change.
+const RUNTIME_MEMORY = (process.env.FUNCTION_MEMORY || "1GiB") as MemoryOption;
+
+function envInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+const RUNTIME_CONCURRENCY = envInt("FUNCTION_CONCURRENCY", 60);
+const RUNTIME_TIMEOUT_SECONDS = envInt("FUNCTION_TIMEOUT_SECONDS", 120);
+
+// Guard: warn (once per cold start) when the reduced ceiling is paired with the
+// in-memory vector backend, which is the OOM-prone path the 1 GiB floor only
+// tolerates for the occasional single fallback — not for sustained load.
+if (process.env.VECTOR_BACKEND !== "firestore" && RUNTIME_MEMORY !== "2GiB" && RUNTIME_MEMORY !== "4GiB") {
+  log("warn", "runtime_memory_backend_mismatch", {
+    note:
+      "VECTOR_BACKEND is not 'firestore' so in-memory cosine search may load a full candidate set per request. " +
+      "The reduced memory ceiling tolerates an occasional single fallback but is not sized for sustained in-memory " +
+      "search at high concurrency — set VECTOR_BACKEND=firestore, or raise FUNCTION_MEMORY (e.g. 2GiB) and/or lower FUNCTION_CONCURRENCY.",
+    memory: RUNTIME_MEMORY,
+    concurrency: RUNTIME_CONCURRENCY,
+  });
+}
+
 // Behaviour/routes are unchanged — this only adjusts runtime resources.
 export const api = onRequest(
-  { memory: "2GiB", timeoutSeconds: 120, concurrency: 8 },
+  { memory: RUNTIME_MEMORY, timeoutSeconds: RUNTIME_TIMEOUT_SECONDS, concurrency: RUNTIME_CONCURRENCY },
   app
 );
 
