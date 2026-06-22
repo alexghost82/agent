@@ -57,4 +57,23 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: public router", () => {
     const authed = await srv.request("GET", "/topics", { token: login.body.token });
     expect(authed.status).toBe(200);
   });
+
+  it("GET /readiness probes Firestore (reachable) and reports the AI check", async () => {
+    const res = await srv.request("GET", "/readiness");
+    // Firestore is reachable via the emulator; AI depends on env so status is
+    // 200 (both green) or 503 (no AI key). Either way the probe ran the checks.
+    expect([200, 503]).toContain(res.status);
+    expect(res.body.checks.firestore).toBe(true);
+    expect(typeof res.body.checks.ai).toBe("boolean");
+    expect(res.body.ok).toBe(res.body.checks.firestore && res.body.checks.ai);
+  });
+
+  it("POST /auth/firebase rejects an invalid id token (401) and a missing one (400)", async () => {
+    expectError(
+      await srv.request("POST", "/auth/firebase", { body: { idToken: "not-a-real-firebase-token" } }),
+      401,
+      "unauthorized"
+    );
+    expectError(await srv.request("POST", "/auth/firebase", { body: {} }), 400, "validation_failed");
+  });
 });

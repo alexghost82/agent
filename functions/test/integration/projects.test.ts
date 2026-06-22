@@ -19,6 +19,10 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: projects router", () => {
     // /github-token encrypts the PAT at rest (contract §1), which needs a master
     // secret; provide a test-only one so the encrypt path succeeds.
     process.env.KEYS_ENC_SECRET = process.env.KEYS_ENC_SECRET || "test-master-secret-for-projects-suite";
+    // Keep enqueue jobs as a recorded no-op so the 202 contract is exercised
+    // without a background network scan/ingest firing during the suite.
+    process.env.SCAN_INLINE = "0";
+    process.env.INGEST_INLINE = "0";
     srv = await startServer();
   });
   afterAll(async () => {
@@ -136,5 +140,135 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: projects router", () => {
       expect([400, 404]).toContain(res.status);
     }
     expect(sawRateLimit).toBe(true);
+  });
+
+  it("connect-github enqueues and marks the project queued (202)", async () => {
+    const user = await seedUser();
+    const id = await addDoc("projects", { userId: user.userId, name: "Repo", description: "connect target" });
+    const res = await srv.request("POST", `/projects/${id}/connect-github`, {
+      token: user.token,
+      body: { repoUrl: "https://github.com/acme/widget" }
+    });
+    expect(res.status).toBe(202);
+    expect(res.body.status).toBe("queued");
+  });
+
+  it("flow-map GET/PUT round-trips per (project, kind) and updates in place", async () => {
+    const user = await seedUser();
+    const id = await addDoc("projects", { userId: user.userId, name: "Mapper", description: "flow map host" });
+
+    // Nothing saved yet -> null.
+    const empty = await srv.request("GET", `/projects/${id}/map?kind=design`, { token: user.token });
+    expect(empty.status).toBe(200);
+    expect(empty.body.map).toBeNull();
+
+    // Save a design map.
+    const save = await srv.request("PUT", `/projects/${id}/map`, {
+      token: user.token,
+      body: { kind: "design", nodes: [{ id: "n1", label: "Node" }], edges: [] }
+    });
+    expect(save.status).toBe(200);
+    expect(save.body.status).toBe("saved");
+    const mapId = save.body.id;
+
+    // GET returns it back.
+    const got = await srv.request("GET", `/projects/${id}/map?kind=design`, { token: user.token });
+    expect(got.body.map.id).toBe(mapId);
+    expect(got.body.map.nodes).toHaveLength(1);
+
+    // A second PUT updates the SAME doc (the existing-map branch).
+    const update = await srv.request("PUT", `/projects/${id}/map`, {
+      token: user.token,
+      body: { kind: "design", nodes: [{ id: "n1", label: "A" }, { id: "n2", label: "B" }], edges: [] }
+    });
+    expect(update.body.id).toBe(mapId);
+    const reread = await srv.request("GET", `/projects/${id}/map?kind=design`, { token: user.token });
+    expect(reread.body.map.nodes).toHaveLength(2);
+
+    // The "project" kind is independent of "design".
+    const projKind = await srv.request("GET", `/projects/${id}/map?kind=project`, { token: user.token });
+    expect(projKind.body.map).toBeNull();
+  });
+
+  it("flow-map rejects an unknown kind (404) and an invalid body (400)", async () => {
+    const user = await seedUser();
+    const id = await addDoc("projects", { userId: user.userId, name: "MapGuard", description: "guards" });
+
+    expectError(
+      await srv.request("GET", `/projects/${id}/map?kind=bogus`, { token: user.token }),
+      404,
+      "not_found"
+    );
+    expectError(
+      await srv.request("PUT", `/projects/${id}/map`, { token: user.token, body: { kind: "nope", nodes: [], edges: [] } }),
+      400,
+      "validation_failed"
+    );
+  });
+
+  it("flow-map is owner-scoped (404 for a foreign project)", async () => {
+    const owner = await seedUser();
+    const other = await seedUser();
+    const id = await addDoc("projects", { userId: owner.userId, name: "Private", description: "owner only" });
+    expectError(
+      await srv.request("GET", `/projects/${id}/map?kind=design`, { token: other.token }),
+      404,
+      "not_found"
+    );
+    expectError(
+      await srv.request("PUT", `/projects/${id}/map`, { token: other.token, body: { kind: "design", nodes: [], edges: [] } }),
+      404,
+      "not_found"
+    );
+  });
+
+  it("scan status/map/node reads are owner-scoped and null/404 before any scan", async () => {
+    const user = await seedUser();
+    const other = await seedUser();
+    const id = await addDoc("projects", { userId: user.userId, name: "Scannable", description: "scan reads" });
+
+    const status = await srv.request("GET", `/projects/${id}/scan`, { token: user.token });
+    expect(status.status).toBe(200);
+    expect(status.body.scan).toBeNull();
+
+    const map = await srv.request("GET", `/projects/${id}/scan/map`, { token: user.token });
+    expect(map.status).toBe(200);
+    expect(map.body.map).toBeNull();
+
+    // No scan yet -> node detail is 404.
+    expectError(
+      await srv.request("GET", `/projects/${id}/nodes/some-node`, { token: user.token }),
+      404,
+      "not_found"
+    );
+
+    // Cross-tenant access is a 404 on every read.
+    expectError(await srv.request("GET", `/projects/${id}/scan`, { token: other.token }), 404, "not_found");
+    expectError(await srv.request("GET", `/projects/${id}/scan/map`, { token: other.token }), 404, "not_found");
+  });
+
+  it("scan POST 400s without a connected repo and 202s once a repo is set", async () => {
+    const user = await seedUser();
+    const noRepo = await addDoc("projects", { userId: user.userId, name: "NoRepo", description: "no repo yet" });
+    expectError(
+      await srv.request("POST", `/projects/${noRepo}/scan`, { token: user.token, body: {} }),
+      400,
+      "bad_request"
+    );
+
+    const withRepo = await addDoc("projects", {
+      userId: user.userId,
+      name: "WithRepo",
+      description: "ready to scan",
+      repoUrl: "https://github.com/acme/demo"
+    });
+    const queued = await srv.request("POST", `/projects/${withRepo}/scan`, { token: user.token, body: { depth: 3 } });
+    expect(queued.status).toBe(202);
+    expect(queued.body.status).toBe("queued");
+    expect(typeof queued.body.scanId).toBe("string");
+
+    // The /rescan alias shares the handler.
+    const rescan = await srv.request("POST", `/projects/${withRepo}/rescan`, { token: user.token, body: {} });
+    expect(rescan.status).toBe(202);
   });
 });

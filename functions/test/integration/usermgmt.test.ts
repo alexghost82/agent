@@ -131,6 +131,29 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: security v2 (cookies + roles 
     expect(reread?.role).toBe("admin");
   });
 
+  it("admin lists invites; members are forbidden (403)", async () => {
+    const admin = await seedUser({ role: "admin" });
+    const member = await seedUser({ role: "member" });
+
+    const created = await srv.request("POST", "/invites", { token: admin.token, body: { role: "member" } });
+    const code = created.body.code as string;
+
+    const list = await srv.request("GET", "/invites", { token: admin.token });
+    expect(list.status).toBe(200);
+    expect(list.body.invites.some((i: { code: string }) => i.code === code)).toBe(true);
+
+    expectError(await srv.request("GET", "/invites", { token: member.token }), 403, "forbidden");
+  });
+
+  it("role change 404s for an unknown user", async () => {
+    const admin = await seedUser({ role: "admin" });
+    expectError(
+      await srv.request("PATCH", "/users/no-such-user/role", { token: admin.token, body: { role: "member" } }),
+      404,
+      "not_found"
+    );
+  });
+
   it("prevents demoting the last admin (409)", async () => {
     // Use isolated usernames; ensure exactly one admin exists for this check by
     // demoting from a state where the target is the only admin among a known set.
