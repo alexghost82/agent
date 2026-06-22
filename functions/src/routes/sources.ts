@@ -6,7 +6,7 @@ import { recordUsage } from "../usage";
 import { rateLimit } from "../ratelimit";
 import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
-import { listScoped } from "../listing";
+import { listScopedPage } from "../listing";
 import { sendError, notFound } from "../errors";
 import { LearnSchema } from "../schemas";
 
@@ -15,12 +15,18 @@ export const sourcesRouter = Router();
 sourcesRouter.get("/sources", async (req: AuthedRequest, res: Response) => {
   try {
     const topicId = typeof req.query.topicId === "string" ? req.query.topicId : null;
-    const sources = await listScoped({
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : null;
+    const limit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
+    const { items, nextCursor } = await listScopedPage({
       collection: "sources",
       userId: req.userId!,
-      where: topicId ? [["topicId", topicId]] : []
+      where: topicId ? [["topicId", topicId]] : [],
+      cursor,
+      pageSize: limit
     });
-    res.json({ sources });
+    // Additive paginated shape: `sources` is preserved for existing consumers,
+    // `items`/`nextCursor` expose cursor pagination (nextCursor null = exhausted).
+    res.json({ sources: items, items, nextCursor });
   } catch (err) {
     sendError(req, res, err);
   }
