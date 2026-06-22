@@ -74,11 +74,18 @@ export function initTelemetry(): boolean {
     const { MetricExporter } = require("@google-cloud/opentelemetry-cloud-monitoring-exporter");
     const { PeriodicExportingMetricReader } = require("@opentelemetry/sdk-metrics");
     const { resourceFromAttributes } = require("@opentelemetry/resources");
+    const { HttpInstrumentation } = require("@opentelemetry/instrumentation-http");
+    const { ExpressInstrumentation } = require("@opentelemetry/instrumentation-express");
 
     const projectId = gcpProject();
     const sdk = new NodeSDK({
       resource: resourceFromAttributes({ "service.name": SERVICE_NAME }),
       traceExporter: new TraceExporter(projectId ? { projectId } : {}),
+      // Auto-instrument incoming HTTP + Express so every request gets a server
+      // span without per-route wiring. These patch `http`/`express` via
+      // require-in-the-middle, so the SDK must start BEFORE those modules are
+      // imported — guaranteed by importing this module first in index.ts.
+      instrumentations: [new HttpInstrumentation(), new ExpressInstrumentation()],
       metricReader: new PeriodicExportingMetricReader({
         exporter: new MetricExporter(projectId ? { projectId } : {}),
         // Cloud Monitoring rejects writes more frequent than once per minute per
@@ -234,11 +241,8 @@ export function recordError(err: unknown, attrs: Attributes = {}): void {
   log("error", "telemetry_error", { ...attrs, error: e.message, errorType: e.name });
 }
 
-// Auto-init on first import. In prod this starts the SDK before the first
-// request is served (log.ts — which imports this module — is loaded at startup
-// and is imported app-wide). Guarded, so it is a hard no-op in tests/emulator.
-// NOTE: for full HTTP/Express AUTO-instrumentation the SDK must start before
-// those modules are required; that requires a top-of-file `initTelemetry()` in
-// index.ts (tracked as a follow-up — see docs/notes/observability.md). The
-// manual spans/metrics in this codebase do not depend on it.
+// Auto-init on first import. `index.ts` imports this module FIRST (before
+// `express`/`http`), so in a real runtime the SDK starts — and patches the
+// HTTP/Express modules for auto-instrumentation — before those modules are
+// evaluated. Guarded, so it is a hard no-op in tests/emulator.
 initTelemetry();

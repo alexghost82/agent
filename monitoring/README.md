@@ -108,8 +108,8 @@ confirm names with `gcloud monitoring metrics-descriptors list` after deploy.
 |-------|-----------------------|------------------------|
 | OOM | Log signatures + (optional) `run.googleapis.com/container/memory/utilizations` | — (OOM stays log/infra based) |
 | Error rate | `run.googleapis.com/request_count` (`response_code_class=5xx`) | Optionally Agent I's `recordError` counter for app-level error classification |
-| p95 latency | `run.googleapis.com/request_latencies` (ms) | `workload.googleapis.com/http.server.request.duration` (verify name + unit) |
-| Vector-search failures | `jsonPayload.event="vector_findnearest_fallback_inmemory"` log | `workload.googleapis.com/vector.search.fallback.count` (rate threshold) |
+| p95 latency | `run.googleapis.com/request_latencies` (ms) | `workload.googleapis.com/http_server_request_ms` (histogram, ms) |
+| Vector-search failures | `jsonPayload.event="vector_findnearest_fallback_inmemory"` log | `workload.googleapis.com/vector_search_fallback_total` (counter, label `reason`; rate threshold) |
 
 > **Risk:** the metric-name upgrades above are placeholders until Agent I's telemetry is
 > deployed and the descriptors confirmed. The shipped policies deliberately default to

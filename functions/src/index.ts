@@ -1,3 +1,9 @@
+// Telemetry MUST load before express/http so the OpenTelemetry SDK starts and
+// patches those modules for auto-instrumentation before they are evaluated.
+// This module self-initializes on import (guarded no-op in tests/emulator).
+// Keep this as the FIRST import.
+import "./telemetry";
+
 import { onRequest } from "firebase-functions/v2/https";
 import type { MemoryOption } from "firebase-functions/v2/options";
 import express from "express";

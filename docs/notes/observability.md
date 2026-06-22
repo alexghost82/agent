@@ -118,11 +118,11 @@ counts + logs, so it is always safe.
 
 ## Follow-ups (cross-file, out of this change's ownership)
 
-1. **`index.ts` bootstrap**: call `initTelemetry()` at the very top of
-   `index.ts` (before importing `express`/`http`/routers) to enable full
-   HTTP/Express auto-instrumentation and guarantee SDK start before first
-   request. The manual spans/metrics here do not depend on it; this only adds
-   automatic incoming-request spans.
+1. ~~**`index.ts` bootstrap**~~ — DONE. `index.ts` now imports `./telemetry`
+   first (before `express`/`http`), so the SDK starts and patches those modules
+   before they are evaluated. `initTelemetry()` registers
+   `HttpInstrumentation` + `ExpressInstrumentation`, so incoming requests get
+   automatic server spans in addition to the manual spans/metrics.
 2. **Routes adopt `recordError`** in their catch blocks (see above).
 3. Optional: tune `exportIntervalMillis` / add OTel resource detectors if richer
    GCP resource labels are wanted.

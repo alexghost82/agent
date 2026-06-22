@@ -158,7 +158,7 @@ resource "google_monitoring_alert_policy" "api_p95_latency" {
   documentation {
     mime_type = "text/markdown"
     subject   = "[WARNING] api p95 latency elevated"
-    content   = "Severity WARNING. p95 latency above threshold on api. Once Agent I OTel latency metric is deployed, switch the filter to workload.googleapis.com/http.server.request.duration. Runbook: https://runbooks.internal/${var.project_id}/api-latency"
+    content   = "Severity WARNING. p95 latency above threshold on api. Once Agent I OTel latency metric is deployed, switch the filter to workload.googleapis.com/http_server_request_ms (histogram, ms). Runbook: https://runbooks.internal/${var.project_id}/api-latency"
   }
 }
 
@@ -188,6 +188,6 @@ resource "google_monitoring_alert_policy" "api_vector_search_failures" {
   documentation {
     mime_type = "text/markdown"
     subject   = "[WARNING] api vector search falling back to in-memory"
-    content   = "Severity WARNING. Firestore findNearest fell back to in-memory search on api. Once Agent I deploys the fallback counter, prefer a rate-based condition on workload.googleapis.com/vector.search.fallback.count. Runbook: https://runbooks.internal/${var.project_id}/api-vector-search"
+    content   = "Severity WARNING. Firestore findNearest fell back to in-memory search on api. Once Agent I deploys the fallback counter, prefer a rate-based condition on workload.googleapis.com/vector_search_fallback_total (label reason). Runbook: https://runbooks.internal/${var.project_id}/api-vector-search"
   }
 }
