@@ -11,8 +11,12 @@ with timing-safe compare, AES-256-GCM encryption of user provider keys **and** t
 GitHub PAT, hashed-and-expiring session tokens with server-side logout, a
 distributed login throttle, an SSRF guard on outbound fetches, read-only GitHub
 access, deny-all Firestore rules, input bounds on all schemas, a coded error
-envelope, and a CI secret scanner. The remaining gaps are the **`localStorage`
-session token** and the **permissive CORS default in non-production**.
+envelope, and a CI secret scanner. The 2026-06-22 hardening orchestration
+additionally closed both SSRF classes (redirect-follow + DNS-rebinding TOCTOU),
+replaced the permissive dev CORS default with an explicit allow-list, added staged
+Firebase App Check, and introduced AES key versioning/rotation. The remaining gaps
+are now **rollout-dependent**: the **`localStorage` session token** and completing
+the **App Check `warn → enforce`** rollout.
 
 ---
 
@@ -35,6 +39,35 @@ session token** and the **permissive CORS default in non-production**.
 - **Decrypt failures are logged**, not silently swallowed; the env-key fallback
   is intentional for availability (`ai.ts:46-54`). (was S9, downgraded)
 
+## Resolved in the 2026-06-22 hardening orchestration (verified per branch)
+
+Each item below is fixed on a committed feature branch (isolated worktree, ready
+for merge — see [`docs/notes/integration-plan.md`](docs/notes/integration-plan.md)).
+
+- **Redirect-follow SSRF closed** — outbound fetches now follow redirects
+  **manually** with per-hop revalidation through the SSRF guard and a 5-hop cap,
+  so a public URL can no longer redirect into a private/metadata address.
+  *Evidence:* `feature/ssrf-hardening` (`f89ac63`) — `functions/src/ssrf.ts`,
+  `functions/test/ssrf.test.ts`.
+- **DNS-rebinding TOCTOU closed** — the resolved/validated IP is **pinned** for the
+  actual connection via an undici dispatcher that preserves Host/SNI, eliminating
+  the resolve-then-connect race. *Evidence:* `feature/ssrf-hardening` (`f89ac63`) —
+  `functions/src/ssrf.ts`.
+- **CORS reflect-all removed** — the permissive dev/emulator origin reflection is
+  replaced by an explicit localhost allow-list (was finding **S5**).
+  *Evidence:* `feature/app-check` (`d073f97`) — `functions/src/index.ts`.
+- **Firebase App Check added (staged)** — App Check verification on the authed
+  section with `off`/`warn`/`enforce` modes (default `warn`, emulator-bypass),
+  adding client-attestation defense for the API. *Evidence:* `feature/app-check`
+  (`d073f97`) — `functions/src/index.ts`, `functions/src/auth.ts`,
+  `functions/test/appcheck.test.ts`.
+- **Encryption key versioning & rotation** — `EncryptedSecret` gains an optional
+  `v` (key version), with an idempotent dry-run rotation migration and a runbook;
+  fully backward-compatible (missing version ⇒ v1). *Evidence:*
+  `feature/key-rotation` (`69f5f20`) — `functions/src/crypto.ts`,
+  `functions/test/crypto.test.ts`, `functions/scripts/rotate-keys.ts`,
+  `docs/notes/key-rotation.md`.
+
 ## Open findings
 
 ### S4 — Session token stored in `localStorage` (XSS exfiltration) — Medium
@@ -45,15 +78,10 @@ session token** and the **permissive CORS default in non-production**.
 - **Mitigation:** Prefer httpOnly cookie sessions, or keep short-lived tokens
   plus a strict CSP.
 
-### S5 — CORS allows all origins outside production — Low/Medium
-- **Evidence:** `index.ts:47-55` — with no `ALLOWED_ORIGINS`, production blocks
-  cross-origin requests but development/emulator reflects all origins
-  (`corsOrigin = true`).
-- **Note:** Auth uses bearer tokens (not cookies) with `credentials:false`, so
-  classic CSRF impact is limited; the permissive dev default is the residual
-  weakness.
-- **Mitigation:** Document/require an explicit allow-list in any internet-exposed
-  non-prod environment.
+### S5 — CORS allows all origins outside production — RESOLVED (2026-06-22)
+- **Status:** Fixed on `feature/app-check` (`d073f97`) — the reflect-all dev
+  default is replaced by an explicit localhost allow-list in
+  `functions/src/index.ts`. Retained here for traceability.
 
 ### S6 — Per-route rate limiter is in-memory (per-instance) — Low/Medium
 - **Evidence:** `ratelimit.ts:9-33` (`allow`/`rateLimit`) is per-instance; only
@@ -81,8 +109,27 @@ session token** and the **permissive CORS default in non-production**.
 - CI secret scanner blocks committed keys; `.env*` gitignored and untracked
   (`.github/workflows/ci.yml`, `.gitignore`).
 
-## Security score: 80/100
+## Residual risks (rollout-dependent)
 
-Strong cryptographic, session, and isolation primitives. Remaining points are the
-client-side token storage (S4) and the non-prod CORS default (S5); distributing
-the AI-endpoint rate limit (S6) would harden cost/abuse controls.
+These are not code gaps but deployment/rollout items tracked in
+[`docs/notes/integration-plan.md`](docs/notes/integration-plan.md):
+
+- **App Check is in `warn` mode** — attestation failures are logged but not yet
+  rejected. The API is not yet protected against non-attested clients until
+  `APP_CHECK_ENFORCE=enforce`.
+- **App Check `warn → enforce` rollout** — the web client must initialize the
+  App Check SDK and send `X-Firebase-AppCheck` on every request **before** flipping
+  to `enforce`, or legitimate traffic will be rejected. Consider dedicated error
+  codes in `errors.ts` for App Check rejections.
+- **Session token in `localStorage` (S4)** — unchanged; still XSS-exfiltratable.
+- **Per-route rate limiter is per-instance (S6)** — unchanged.
+- **Key rotation is provisioned, not yet executed** — versioning + migration ship
+  on `feature/key-rotation`; a first rotation should be scheduled per its runbook.
+
+## Security score: 86/100 (was 80)
+
+The 2026-06-22 orchestration closed the two SSRF classes (redirect-follow and
+DNS-rebinding TOCTOU), removed the permissive CORS default, added staged App Check,
+and introduced AES key versioning/rotation. The remaining points reflect
+**rollout** rather than missing controls: App Check still in `warn` (S-AppCheck),
+client-side token storage (S4), and the per-instance AI-endpoint limiter (S6).
