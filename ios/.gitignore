@@ -1,0 +1,3 @@
+# SwiftPM build artifacts from the host-runnable contract harness (ios/Package.swift).
+.build/
+.swiftpm/
