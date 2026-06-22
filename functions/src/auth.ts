@@ -1,8 +1,11 @@
 import * as crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
 import { Timestamp } from "firebase-admin/firestore";
+import { getAppCheck } from "firebase-admin/app-check";
 import { db, admin } from "./firebase";
 import { serverTime } from "./util";
+import { log } from "./log";
+import { sendError, forbidden } from "./errors";
 
 export interface AuthedRequest extends Request {
   userId?: string;
@@ -161,6 +164,65 @@ export interface VerifiedFirebaseUser {
 export async function verifyFirebaseIdToken(idToken: string): Promise<VerifiedFirebaseUser> {
   const decoded = await admin.auth().verifyIdToken(idToken);
   return { uid: decoded.uid, email: decoded.email, name: (decoded as { name?: string }).name };
+}
+
+// Firebase App Check (app-integrity attestation). This is orthogonal to
+// requireAuth: requireAuth proves *who* the user is, App Check proves the
+// request came from *our* app/device, not a scripted client. Enforcement is
+// staged via APP_CHECK_ENFORCE so we can observe traffic before locking it down:
+//   off     – skip entirely (no header read, no verification).
+//   warn    – verify when a token is present, log failures/absence, always allow
+//             (default; keeps the existing web client working during rollout).
+//   enforce – reject any request without a valid App Check token.
+// The header is X-Firebase-AppCheck (per the Firebase client SDKs). App Check is
+// always skipped under the emulator, which has no attestation provider.
+export type AppCheckMode = "off" | "warn" | "enforce";
+
+const APP_CHECK_HEADER = "x-firebase-appcheck";
+
+export function appCheckMode(): AppCheckMode {
+  const raw = (process.env.APP_CHECK_ENFORCE || "warn").trim().toLowerCase();
+  return raw === "off" || raw === "enforce" ? raw : "warn";
+}
+
+export async function appCheck(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
+  // The emulator has no App Check provider; never gate local development on it.
+  if (process.env.FUNCTIONS_EMULATOR) {
+    next();
+    return;
+  }
+
+  const mode = appCheckMode();
+  if (mode === "off") {
+    next();
+    return;
+  }
+
+  const header = req.headers[APP_CHECK_HEADER];
+  const token = (Array.isArray(header) ? header[0] : header)?.trim() || "";
+
+  if (!token) {
+    if (mode === "enforce") {
+      sendError(req, res, forbidden("app_check_required"));
+      return;
+    }
+    log("warn", "app_check_missing", { requestId: req.requestId, userId: req.userId, mode });
+    next();
+    return;
+  }
+
+  try {
+    await getAppCheck().verifyToken(token);
+    next();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log("warn", "app_check_invalid", { requestId: req.requestId, userId: req.userId, mode, message });
+    if (mode === "enforce") {
+      sendError(req, res, forbidden("app_check_invalid"));
+      return;
+    }
+    next();
+  }
 }
 
 export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {

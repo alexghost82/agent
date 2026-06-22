@@ -5,7 +5,7 @@ import cors from "cors";
 import * as dotenv from "dotenv";
 
 import "./firebase";
-import { requireAuth, ensureSeedUsersOnce } from "./auth";
+import { requireAuth, ensureSeedUsersOnce, appCheck } from "./auth";
 import type { AuthedRequest } from "./auth";
 import { requestId, log } from "./log";
 import { securityHeaders } from "./security";
@@ -48,8 +48,13 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-// In production an explicit allow-list is required: never reflect arbitrary
-// origins. In development (or emulator) we allow all origins for convenience.
+// CORS is always an explicit allow-list — we never reflect arbitrary origins.
+// When ALLOWED_ORIGINS is set it wins in every environment. When it is empty we
+// fall back per environment: prod stays locked down (no cross-origin), while
+// dev/emulator defaults to a localhost allow-list instead of echoing back
+// whatever Origin header the caller sent (the old `origin: true` behaviour).
+const DEV_DEFAULT_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
+
 let corsOrigin: boolean | string[];
 if (allowedOrigins.length) {
   corsOrigin = allowedOrigins;
@@ -57,7 +62,8 @@ if (allowedOrigins.length) {
   log("warn", "cors_locked_down", { note: "ALLOWED_ORIGINS is empty in production; cross-origin requests are blocked" });
   corsOrigin = false;
 } else {
-  corsOrigin = true;
+  log("info", "cors_dev_default", { note: "ALLOWED_ORIGINS is empty; defaulting to localhost allow-list", origins: DEV_DEFAULT_ORIGINS });
+  corsOrigin = DEV_DEFAULT_ORIGINS;
 }
 
 const app = express();
@@ -79,6 +85,12 @@ ensureSeedUsersOnce().catch((err) => log("error", "seed_users_failed", { message
 
 // Public routes (no auth).
 app.use(publicRouter);
+
+// Firebase App Check (app-integrity attestation). Mounted after publicRouter so
+// /health, /login, etc. stay reachable, and before requireAuth so the whole
+// authenticated section is attested. Enforcement is staged via APP_CHECK_ENFORCE
+// (default "warn") to avoid locking out existing clients during rollout.
+app.use(appCheck);
 
 // Everything below requires a valid Bearer session token.
 app.use(requireAuth);
