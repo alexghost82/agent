@@ -1,0 +1,28 @@
+{
+  "counts": {
+    "topics": 3,
+    "sources": 12,
+    "knowledge_chunks": 240,
+    "agent_skills": 7,
+    "projects": 2,
+    "project_decisions": 4,
+    "generated_plans": 5,
+    "agent_logs": 38
+  },
+  "recentLogs": [
+    {
+      "id": "log_1",
+      "type": "project_created",
+      "message": "Demo project",
+      "data": { "id": "p_1" },
+      "createdAt": { "_seconds": 1718000000, "_nanoseconds": 0 }
+    },
+    {
+      "id": "log_2",
+      "type": "agent_run_completed",
+      "message": "RSS summarizer",
+      "data": { "runId": "run_1", "files": 6 },
+      "createdAt": { "_seconds": 1718000500, "_nanoseconds": 0 }
+    }
+  ]
+}

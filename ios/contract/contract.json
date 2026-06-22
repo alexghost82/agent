@@ -1,0 +1,290 @@
+{
+  "$comment": "Derived HTTP contract for the GhostAgent iOS client. Source of truth = functions/src (routes + schemas.ts + errors.ts) and docs/API.md. Each endpoint records the request the Swift APIClient builds and the response shape it decodes. Response schemas describe the REAL backend payload (mirrored by fixtures/); divergences between this contract and the iOS Swift models are tracked in docs/notes/ios-api-parity.md.",
+  "baseURL": "https://agent-9d7c2.web.app/api",
+  "auth": {
+    "header": "Authorization",
+    "scheme": "Bearer",
+    "comment": "Every endpoint except /health, /readiness, /login, /accept-invite and /auth/firebase requires `Authorization: Bearer <token>`. The token is the session bearer returned by /login or /auth/firebase."
+  },
+  "errorEnvelope": {
+    "schema": {
+      "type": "object",
+      "fields": [
+        { "name": "error", "type": "string", "required": true },
+        { "name": "requestId", "type": "string", "required": false }
+      ]
+    },
+    "iosModel": "ErrorEnvelope",
+    "errorCodes": [
+      "unauthorized",
+      "forbidden",
+      "rate_limited",
+      "validation_failed",
+      "not_found",
+      "no_api_key",
+      "github_repo_unavailable",
+      "github_access_denied",
+      "github_token_invalid",
+      "github_api_error",
+      "bad_request",
+      "internal"
+    ],
+    "fixtures": [
+      "fixtures/error.unauthorized.json",
+      "fixtures/error.rate_limited.json",
+      "fixtures/error.validation_failed.json",
+      "fixtures/error.not_found.json"
+    ]
+  },
+  "endpoints": [
+    {
+      "id": "login",
+      "iosMethod": "APIClient.login",
+      "method": "POST",
+      "path": "/login",
+      "auth": false,
+      "request": {
+        "type": "object",
+        "fields": [
+          { "name": "username", "type": "string", "required": true },
+          { "name": "password", "type": "string", "required": true }
+        ]
+      },
+      "iosModel": "LoginResponse",
+      "responseFixture": "fixtures/login.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          { "name": "ok", "type": "boolean", "required": true },
+          { "name": "token", "type": "string", "required": true },
+          {
+            "name": "user",
+            "type": "object",
+            "required": true,
+            "fields": [
+              { "name": "username", "type": "string", "required": true },
+              { "name": "role", "type": "string", "required": false }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "authFirebase",
+      "iosMethod": "APIClient.authFirebase",
+      "method": "POST",
+      "path": "/auth/firebase",
+      "auth": false,
+      "request": {
+        "type": "object",
+        "fields": [{ "name": "idToken", "type": "string", "required": true }]
+      },
+      "iosModel": "LoginResponse",
+      "responseFixture": "fixtures/auth-firebase.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          { "name": "ok", "type": "boolean", "required": true },
+          { "name": "token", "type": "string", "required": true },
+          {
+            "name": "user",
+            "type": "object",
+            "required": true,
+            "fields": [{ "name": "username", "type": "string", "required": true }]
+          }
+        ]
+      }
+    },
+    {
+      "id": "logout",
+      "iosMethod": "APIClient.logout",
+      "method": "POST",
+      "path": "/logout",
+      "auth": true,
+      "request": { "type": "object", "fields": [] },
+      "iosModel": "EmptyResponse",
+      "responseFixture": "fixtures/logout.response.json",
+      "response": {
+        "type": "object",
+        "fields": [{ "name": "ok", "type": "boolean", "required": false }]
+      }
+    },
+    {
+      "id": "dashboard",
+      "iosMethod": "APIClient.dashboard / AppModel.loadDashboard",
+      "method": "GET",
+      "path": "/dashboard",
+      "auth": true,
+      "request": null,
+      "iosModel": "DashboardResponse (typed) / raw JSONValue (used by UI)",
+      "responseFixture": "fixtures/dashboard.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "counts",
+            "type": "object",
+            "required": true,
+            "fields": [
+              { "name": "topics", "type": "number", "required": true },
+              { "name": "sources", "type": "number", "required": true },
+              { "name": "knowledge_chunks", "type": "number", "required": true },
+              { "name": "agent_skills", "type": "number", "required": true },
+              { "name": "projects", "type": "number", "required": true },
+              { "name": "project_decisions", "type": "number", "required": true },
+              { "name": "generated_plans", "type": "number", "required": true },
+              { "name": "agent_logs", "type": "number", "required": true }
+            ]
+          },
+          {
+            "name": "recentLogs",
+            "type": "array",
+            "required": true,
+            "items": {
+              "type": "object",
+              "fields": [
+                { "name": "id", "type": "string", "required": true },
+                { "name": "type", "type": "string", "required": false },
+                { "name": "message", "type": "string", "required": false }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "projects",
+      "iosMethod": "APIClient.projects / AppModel.loadProjects",
+      "method": "GET",
+      "path": "/projects",
+      "auth": true,
+      "request": null,
+      "iosModel": "ProjectsResponse / ProjectSummary",
+      "responseFixture": "fixtures/projects.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "projects",
+            "type": "array",
+            "required": true,
+            "items": {
+              "type": "object",
+              "fields": [
+                { "name": "id", "type": "string", "required": true },
+                { "name": "name", "type": "string", "required": true },
+                { "name": "description", "type": "string", "required": false },
+                { "name": "stack", "type": "string", "required": false },
+                { "name": "repoUrl", "type": "string", "required": false }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "agentRun",
+      "iosMethod": "APIClient.agentRun",
+      "method": "POST",
+      "path": "/agent/run",
+      "auth": true,
+      "request": {
+        "type": "object",
+        "fields": [
+          { "name": "urls", "type": "array", "required": true, "items": { "type": "string" } },
+          { "name": "task", "type": "string", "required": true },
+          { "name": "deep", "type": "boolean", "required": true },
+          { "name": "lang", "type": "string", "required": true }
+        ]
+      },
+      "iosModel": "AgentRunResult",
+      "responseFixture": "fixtures/agent-run.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          { "name": "runId", "type": "string", "required": true },
+          { "name": "summary", "type": "string", "required": true },
+          {
+            "name": "files",
+            "type": "array",
+            "required": true,
+            "items": {
+              "type": "object",
+              "fields": [
+                { "name": "path", "type": "string", "required": true },
+                { "name": "content", "type": "string", "required": true },
+                { "name": "language", "type": "string", "required": false },
+                { "name": "bytes", "type": "number", "required": false }
+              ]
+            }
+          },
+          {
+            "name": "steps",
+            "type": "array",
+            "required": true,
+            "items": {
+              "type": "object",
+              "fields": [
+                { "name": "name", "type": "string", "required": true },
+                { "name": "status", "type": "string", "required": true },
+                { "name": "detail", "type": "string", "required": false }
+              ]
+            }
+          },
+          { "name": "topicId", "type": "string", "required": false },
+          { "name": "projectId", "type": "string", "required": false },
+          { "name": "buildRunId", "type": "string", "required": false }
+        ]
+      }
+    },
+    {
+      "id": "agentRunStatus",
+      "iosMethod": "APIClient.agentRunStatus",
+      "method": "GET",
+      "path": "/agent/runs/:id",
+      "auth": true,
+      "request": null,
+      "iosModel": "AgentRunEnvelope -> AgentRun",
+      "responseFixture": "fixtures/agent-run-status.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "run",
+            "type": "object",
+            "required": true,
+            "fields": [
+              { "name": "id", "type": "string", "required": true },
+              { "name": "status", "type": "string", "required": false },
+              { "name": "steps", "type": "array", "required": false, "items": { "type": "object" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "agentRuns",
+      "iosMethod": "APIClient.agentRuns",
+      "method": "GET",
+      "path": "/agent/runs",
+      "auth": true,
+      "request": null,
+      "iosModel": "AgentRunsEnvelope -> [AgentRun]",
+      "responseFixture": "fixtures/agent-runs.response.json",
+      "response": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "runs",
+            "type": "array",
+            "required": true,
+            "items": {
+              "type": "object",
+              "fields": [{ "name": "id", "type": "string", "required": true }]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

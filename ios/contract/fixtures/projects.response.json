@@ -1,0 +1,26 @@
+{
+  "projects": [
+    {
+      "id": "p_1",
+      "name": "Demo",
+      "description": "A demo project",
+      "stack": "swift",
+      "repoUrl": "https://github.com/acme/demo",
+      "skillIds": ["s_1", "s_2"],
+      "summary": null,
+      "ingestStatus": "ready",
+      "createdAt": { "_seconds": 1718000000, "_nanoseconds": 0 }
+    },
+    {
+      "id": "p_2",
+      "name": "Greenfield",
+      "description": "From scratch",
+      "stack": null,
+      "repoUrl": null,
+      "skillIds": [],
+      "summary": null,
+      "ingestStatus": "none",
+      "createdAt": { "_seconds": 1718000100, "_nanoseconds": 0 }
+    }
+  ]
+}
