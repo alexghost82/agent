@@ -10,6 +10,7 @@
 // ignored here to avoid double-linting with conflicting rules.
 import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 import nextTypescript from "eslint-config-next/typescript";
+import reactHooks from "eslint-plugin-react-hooks";
 
 const eslintConfig = [
   {
@@ -26,6 +27,10 @@ const eslintConfig = [
   ...nextCoreWebVitals,
   ...nextTypescript,
   {
+    // Declare the react-hooks plugin in the same config object that overrides
+    // its rule (flat config requires the plugin to be defined where its rule is
+    // referenced; eslint-config-next does not re-export it for downstream use).
+    plugins: { "react-hooks": reactHooks },
     // Keep stylistic / non-correctness findings as warnings so the mandatory
     // gate fails on real problems rather than churn across the existing tree.
     rules: {
