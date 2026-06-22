@@ -1,0 +1,30 @@
+{
+  "displayName": "api — Firestore vector-search failures (in-memory fallback)",
+  "combiner": "OR",
+  "severity": "WARNING",
+  "conditions": [
+    {
+      "displayName": "vector_findnearest_fallback_inmemory log event observed",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"api\" jsonPayload.event=\"vector_findnearest_fallback_inmemory\"",
+        "labelExtractors": {
+          "projectId": "EXTRACT(jsonPayload.projectId)"
+        }
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": {
+      "period": "600s"
+    },
+    "autoClose": "1800s"
+  },
+  "notificationChannels": [
+    "${NOTIFICATION_CHANNEL_ID}"
+  ],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "subject": "[WARNING] api vector search falling back to in-memory",
+    "content": "## Severity: WARNING\n\nThe `api` service logged `vector_findnearest_fallback_inmemory` (from `functions/src/memory.ts`, Agent A), meaning Firestore `findNearest` vector search failed or was unavailable and the request degraded to the in-memory backend. Recall and latency are both degraded while this fires.\n\n### Signal (default, immediate)\n**Log-based** on `jsonPayload.event=\"vector_findnearest_fallback_inmemory\"`. Works as soon as Agent A's log event ships — no metric backend required.\n\n### Agent I alternative (metric, once telemetry is deployed)\nAgent I exports a counter distinguishing firestore vs in-memory-fallback. Replace this with a `conditionThreshold` on that metric, e.g. `metric.type=\"workload.googleapis.com/vector.search.fallback.count\"` (confirm exact name/labels), `ALIGN_RATE`, `COMPARISON_GT` over a 5m window. The metric form gives a tunable rate threshold instead of match-any.\n\n### Runbook\n1. Confirm the Firestore vector index (`embedding` field override in `firestore.indexes.json`) is built and not in error.\n2. Check Firestore quota / availability and recent index changes.\n3. Verify `VECTOR_BACKEND=\"firestore\"` is intended for the affected project.\n4. Runbook: https://runbooks.internal/${PROJECT_ID}/api-vector-search.\n\n### Tuning\nRaise `notificationRateLimit.period` if occasional fallback is acceptable; switch to the Agent I metric to alert only when the fallback *rate* crosses a threshold."
+  }
+}
