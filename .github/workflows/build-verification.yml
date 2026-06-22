@@ -1,0 +1,84 @@
+# Gated REAL build-verification (Epic 4 / CONTRACT v3.1).
+#
+# This is a SEPARATE workflow from ci.yml on purpose: it executes model-style
+# generated code (a real toolchain: tsc/eslint/npm test) inside the sandbox, so
+# it must NEVER run on push/PR where it could break normal CI or be triggered by
+# untrusted contributors. It runs only on manual dispatch or a schedule, on an
+# isolated, disposable GitHub-hosted runner with BUILD_EXEC_ENABLED=1.
+#
+# Safety/isolation comes from src/sandbox.ts: scrubbed minimal env (no inherited
+# secrets), offline npm with --ignore-scripts, no shell, per-process timeout,
+# cwd pinned to an ephemeral temp dir with a containment guard, and best-effort
+# cleanup. The runner itself is ephemeral and discarded after the job.
+name: Build Verification (gated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture_path:
+        description: "Optional path to a fixture project dir (relative to functions/). Empty = generated sample."
+        required: false
+        default: ""
+  schedule:
+    # Weekly smoke of the real-exec path (Mondays 06:00 UTC). Adjust as needed.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-exec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Unlock the real toolchain path inside the sandbox for this runner only.
+      BUILD_EXEC_ENABLED: "1"
+      BUILD_EXEC_TIMEOUT_MS: "120000"
+      # Optional gate. Secrets cannot be used in `if:`, so map it into env and
+      # check it in the gate step. Manual dispatch always passes the gate.
+      GATE_FLAG: ${{ secrets.BUILD_EXEC_RUNNER }}
+    steps:
+      - name: Gate (skip gracefully unless dispatched or the flag is set)
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${GATE_FLAG}" = "1" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Gate open (event=${{ github.event_name }}); running gated real-exec build verification."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Build verification skipped::Secret BUILD_EXEC_RUNNER is not '1' and this is not a manual dispatch; skipping the gated real-exec build."
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: "Install functions deps (provides the sandbox toolchain: tsc/eslint)"
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: functions
+        run: npm install
+
+      - name: Typecheck functions (src) — must stay green
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: functions
+        run: npm run build
+
+      - name: Run gated real-exec integration test
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: functions
+        run: npx vitest run test/integration-real/build_exec.test.ts
+
+      - name: Run standalone verify-build harness on the fixture
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: functions
+        run: npx -y tsx scripts/verify-build.ts "${{ github.event.inputs.fixture_path }}"
