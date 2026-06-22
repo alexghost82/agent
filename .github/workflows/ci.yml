@@ -17,19 +17,11 @@ jobs:
       - name: Typecheck Next.js
         run: npm run typecheck
       - name: Lint frontend
-        # Next 16 removed `next lint`; linting is now the ESLint CLI driven by a
-        # root flat config (owned by the Frontend/Architect missions). Run it when
-        # a config is present; otherwise emit a warning and pass so this gate
-        # auto-activates the moment the config lands, without blocking unrelated work.
-        run: |
-          shopt -s nullglob
-          configs=(eslint.config.* .eslintrc*)
-          if [ ${#configs[@]} -gt 0 ]; then
-            echo "ESLint config found (${configs[*]}); running frontend lint."
-            npx --no-install eslint .
-          else
-            echo "::warning title=Frontend lint pending::No root ESLint flat config found (Next 16 removed 'next lint'). Add eslint.config.mjs (e.g. 'npx @next/codemod next-lint-to-eslint-cli .') and this gate will run automatically."
-          fi
+        # Next 16 removed `next lint`; linting is the ESLint CLI driven by the
+        # root flat config (eslint.config.mjs). This is a MANDATORY gate: any
+        # ESLint error fails the build. Stylistic findings are configured as
+        # warnings in the flat config and do not fail CI.
+        run: npx --no-install eslint .
       - name: Frontend tests (Vitest + RTL)
         # Runs the app/** unit/component tests added by the Frontend mission.
         # Skips automatically if the script is not present so unrelated work is
