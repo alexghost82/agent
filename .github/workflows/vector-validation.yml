@@ -1,0 +1,120 @@
+# REAL Firestore Vector Search validation.
+#
+# This is a SEPARATE workflow from CI (.github/workflows/ci.yml) on purpose: it
+# runs the `findNearest` integration test against a REAL (test) Firebase project,
+# which the Firestore emulator cannot validate. It deploys the vector index,
+# waits for it to build, then runs the gated `integration-real` suite.
+#
+# It MUST NEVER run on push/pull_request, so it can never block normal CI. It is
+# manually dispatchable and runs on a weekly schedule. If the required repo
+# secrets are absent (e.g. on a fork), every real step skips gracefully and the
+# job still succeeds.
+#
+# Required repo secrets:
+#   FIREBASE_TOKEN      - CI token for `firebase deploy` (firebase login:ci).
+#   GHOST_TEST_PROJECT  - project id of a DISPOSABLE test Firebase project.
+#   GHOST_TEST_SA_KEY   - service-account JSON for that project; used as Admin SDK
+#                         credentials (GOOGLE_APPLICATION_CREDENTIALS) at runtime
+#                         and to authenticate gcloud for the index-READY poll.
+name: vector-validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Mondays 04:17 UTC. Off-peak; never on push/PR.
+    - cron: "17 4 * * 1"
+
+# Avoid overlapping real-project runs (they share seeded test data namespaces).
+concurrency:
+  group: vector-validation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  vector-real:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      GHOST_TEST_PROJECT: ${{ secrets.GHOST_TEST_PROJECT }}
+      GHOST_TEST_SA_KEY: ${{ secrets.GHOST_TEST_SA_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gate the whole pipeline on secret presence WITHOUT printing the values.
+      # Secrets cannot be used in job-level `if:`, so we expose a boolean output.
+      - name: Check required secrets
+        id: guard
+        run: |
+          if [ -n "$FIREBASE_TOKEN" ] && [ -n "$GHOST_TEST_PROJECT" ] && [ -n "$GHOST_TEST_SA_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "Required secrets present; running real vector validation."
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Vector validation skipped::Required secrets (FIREBASE_TOKEN, GHOST_TEST_PROJECT, GHOST_TEST_SA_KEY) are not configured; skipping real validation."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ok == 'true'
+        with:
+          node-version: 20
+
+      - name: Set up gcloud
+        if: steps.guard.outputs.ok == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Write service-account credentials
+        if: steps.guard.outputs.ok == 'true'
+        run: |
+          printf '%s' "$GHOST_TEST_SA_KEY" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          gcloud auth activate-service-account --key-file "$RUNNER_TEMP/sa.json"
+          gcloud config set project "$GHOST_TEST_PROJECT"
+
+      - name: Install functions deps
+        if: steps.guard.outputs.ok == 'true'
+        run: cd functions && npm install
+
+      - name: Build functions
+        if: steps.guard.outputs.ok == 'true'
+        run: cd functions && npm run build
+
+      - name: Deploy Firestore vector indexes
+        if: steps.guard.outputs.ok == 'true'
+        run: |
+          npx -y firebase-tools@latest deploy \
+            --only firestore:indexes \
+            --project "$GHOST_TEST_PROJECT" \
+            --token "$FIREBASE_TOKEN" \
+            --non-interactive
+
+      - name: Wait for vector indexes to be READY
+        if: steps.guard.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 1800 )) # up to 30 min for index build
+          while :; do
+            states=$(gcloud firestore indexes composite list \
+              --project "$GHOST_TEST_PROJECT" \
+              --format='value(state)' 2>/dev/null || true)
+            if [ -n "$states" ] && ! echo "$states" | grep -vq '^READY$'; then
+              echo "All composite indexes READY."
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error title=Index build timeout::Vector indexes did not reach READY within 30m."
+              echo "Current states:"; echo "$states"
+              exit 1
+            fi
+            echo "Indexes not READY yet; states: ${states:-<none>}; waiting 20s..."
+            sleep 20
+          done
+
+      - name: Run REAL vector validation test
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          GHOST_VECTOR_REAL: "1"
+          GCLOUD_PROJECT: ${{ secrets.GHOST_TEST_PROJECT }}
+          VECTOR_BACKEND: firestore
+        run: cd functions && npx vitest run test/integration-real/vector_real.test.ts
