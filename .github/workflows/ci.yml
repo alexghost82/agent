@@ -69,10 +69,10 @@ jobs:
               --coverage.reporter=lcov \
               --coverage.include='src/**' \
               --coverage.exclude='src/index.ts' \
-              --coverage.thresholds.lines=85 \
-              --coverage.thresholds.statements=85 \
-              --coverage.thresholds.functions=85 \
-              --coverage.thresholds.branches=75"
+              --coverage.thresholds.lines=88 \
+              --coverage.thresholds.statements=88 \
+              --coverage.thresholds.functions=90 \
+              --coverage.thresholds.branches=76"
 
   secret-scan:
     runs-on: ubuntu-latest
