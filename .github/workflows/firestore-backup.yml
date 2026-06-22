@@ -1,0 +1,80 @@
+name: Firestore Backup
+
+# Dispatch/schedule-only. Intentionally NOT triggered on push/pull_request so it
+# never blocks normal CI (see .github/workflows/ci.yml). Implements ADR-0006:
+# validates the backup IaC and can trigger an on-demand Firestore -> GCS export.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        type: choice
+        default: validate
+        options:
+          - validate # terraform fmt/validate only (no cloud access)
+          - export   # trigger an on-demand Firestore export to GCS
+  schedule:
+    # Safety-net export at 03:30 UTC daily. The PRIMARY schedule lives in GCP
+    # (Cloud Scheduler, provisioned by infra/firestore-backups). This job is a
+    # belt-and-suspenders trigger and no-ops unless GCP auth is configured.
+    - cron: "30 3 * * *"
+
+permissions:
+  contents: read
+  id-token: write # for Workload Identity Federation (keyless google auth)
+
+jobs:
+  validate:
+    name: Validate backup IaC
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/firestore-backups
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+      - name: terraform init (no backend)
+        run: terraform init -backend=false -input=false
+      - name: terraform validate
+        run: terraform validate
+
+  export:
+    name: Trigger Firestore export
+    needs: validate
+    # Only run for the scheduled trigger or an explicit "export" dispatch, and
+    # only when cloud auth is wired up via repo variables/secrets.
+    if: >-
+      (github.event_name == 'schedule' || github.event.inputs.action == 'export') &&
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+      vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_EXPORTER_SERVICE_ACCOUNT }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Run on-demand Firestore export
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          EXPORT_BUCKET: ${{ vars.FIRESTORE_EXPORT_BUCKET }}
+        run: |
+          set -euo pipefail
+          BUCKET="${EXPORT_BUCKET:-${PROJECT_ID}-firestore-exports}"
+          echo "Exporting Firestore (${PROJECT_ID}) -> gs://${BUCKET}"
+          gcloud firestore export "gs://${BUCKET}" --project "${PROJECT_ID}"
+      - name: Verify export landed
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          EXPORT_BUCKET: ${{ vars.FIRESTORE_EXPORT_BUCKET }}
+        run: |
+          set -euo pipefail
+          BUCKET="${EXPORT_BUCKET:-${PROJECT_ID}-firestore-exports}"
+          gcloud storage ls "gs://${BUCKET}/" | tail -n 5
