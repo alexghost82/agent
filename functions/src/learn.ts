@@ -9,6 +9,12 @@ import { log } from "./log";
 const EMBED_BATCH = Number(process.env.EMBED_BATCH_SIZE) || 96;
 const WRITE_BATCH = 400;
 
+// Embeddings returned by `embedding()` / `embeddingBatch()` are ALREADY
+// canonicalized to TARGET_EMBED_DIM by the ai.ts normalization funnel (ADR-0008).
+// Ingestion stores them verbatim — do NOT re-normalize or resize here, so the
+// stored `embedding` always matches the single fixed dimension of the Firestore
+// vector index regardless of which provider produced it.
+
 // Self-learning loop + dedup (CONTRACT v3.4 / v2.1).
 //
 // `recordOutcome` writes the result of a design/plan/build/ask back into memory
