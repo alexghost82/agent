@@ -10,7 +10,7 @@
  * IMPORTANT: skipIf conditions are evaluated at COLLECTION time (before any
  * beforeAll), so the probes are computed here at module top-level await.
  */
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import {
   EMULATOR_AVAILABLE,
   startServer,
@@ -22,6 +22,7 @@ import {
   sha256Hex,
   type TestServer
 } from "../helpers/harness";
+import { log, requestId } from "../../src/log";
 
 const PROTECTED_GETS = [
   "/topics",
@@ -231,8 +232,60 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: contract §1 security & obser
   });
 
   describe("observability hooks (contract §1)", () => {
-    // No stable HTTP surface to assert against yet; tracked as explicit gaps.
-    it.todo("emits structured JSON logs with requestId/userId to stdout — verify via log sink");
+    // ACTIVATED (was it.todo): the structured logger and the requestId
+    // correlation middleware are unit-testable directly, no emulator/HTTP surface
+    // required, so this runs in the default suite as a real assertion.
+    it("emits structured JSON logs with requestId/userId to stdout", () => {
+      const lines: string[] = [];
+      const out = vi.spyOn(console, "log").mockImplementation((l: string) => void lines.push(l));
+      const err = vi.spyOn(console, "error").mockImplementation((l: string) => void lines.push(l));
+      try {
+        log("info", "request_handled", { requestId: "req-123", userId: "user-9", extra: undefined });
+        log("error", "request_failed", { requestId: "req-456", userId: "user-9" });
+      } finally {
+        out.mockRestore();
+        err.mockRestore();
+      }
+
+      const info = JSON.parse(lines[0]);
+      expect(info).toMatchObject({
+        severity: "INFO",
+        level: "info",
+        event: "request_handled",
+        requestId: "req-123",
+        userId: "user-9"
+      });
+      expect(typeof info.time).toBe("string");
+      // Undefined fields are dropped so the JSON line stays compact.
+      expect("extra" in info).toBe(false);
+
+      const errEntry = JSON.parse(lines[1]);
+      expect(errEntry.severity).toBe("ERROR");
+      expect(errEntry.event).toBe("request_failed");
+    });
+
+    it("assigns a correlation id per request and honours an inbound X-Request-Id", () => {
+      const headers: Record<string, string> = {};
+      const makeRes = () => ({ setHeader: (k: string, v: string) => (headers[k] = v) });
+
+      const generated = { headers: {} } as any;
+      let next1 = false;
+      requestId(generated, makeRes() as any, () => (next1 = true));
+      expect(next1).toBe(true);
+      expect(typeof generated.requestId).toBe("string");
+      expect(generated.requestId.length).toBeGreaterThan(0);
+      expect(headers["X-Request-Id"]).toBe(generated.requestId);
+
+      const inbound = { headers: { "x-request-id": "  lb-abc-789  " } } as any;
+      requestId(inbound, makeRes() as any, () => {});
+      // Trimmed and propagated to the response header.
+      expect(inbound.requestId).toBe("lb-abc-789");
+      expect(headers["X-Request-Id"]).toBe("lb-abc-789");
+    });
+
+    // Error-tracking sink (Sentry / Cloud Error Reporting) is not yet wired in
+    // src/**. Implementing it requires a source-level hook owned by the Backend
+    // mission; tracked as a follow-up rather than a here-and-now assertion.
     it.todo("wires an error-tracking hook (Sentry / Cloud Error Reporting)");
   });
 });
