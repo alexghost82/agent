@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars and fill in. Use placeholders / your own project.
+# Do NOT commit a real terraform.tfvars with project-specific values.
+
+project_id         = "your-gcp-project-id"
+region             = "us-central1"
+database_id        = "(default)"
+firestore_location = "nam5"
+
+# --- Managed backups (primary) ---
+enable_managed_backups  = true
+daily_backup_retention  = "604800s"  # 7 days
+enable_weekly_backup    = true
+weekly_backup_retention = "8467200s" # 14 weeks
+weekly_backup_day       = "SUNDAY"
+
+# --- GCS export (portable snapshots) ---
+enable_gcs_export        = true
+export_bucket_name       = "" # defaults to "<project_id>-firestore-exports"
+export_schedule_cron     = "30 2 * * *"
+export_schedule_timezone = "Etc/UTC"
+export_retention_days    = 30
+export_collection_ids    = [] # [] = whole database
