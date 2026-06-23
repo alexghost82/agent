@@ -24,8 +24,7 @@ export function Login({ g }: { g: GhostData }) {
         </button>
       </div>
       <form className="login-card" onSubmit={g.doLogin}>
-        <img src="/ghost-logo.png" alt="GHOST" className="login-logo" />
-        <h1>GHOST Agent Builder</h1>
+        <img src="/ghost-lockup.png" alt="GHOST Agent Builder" className="login-logo" />
         <p className="login-sub">{t.login.title}</p>
         <label>{t.login.username}</label>
         <input

@@ -70,13 +70,13 @@ body {
 }
 .brand { display: flex; align-items: center; gap: 11px; padding: 2px 4px; }
 .brand-logo-box {
-  flex: 0 0 auto; width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
-  background: linear-gradient(160deg, var(--panel-2), var(--bg));
+  flex: 0 0 auto; width: 42px; height: 42px; border-radius: 13px; overflow: hidden;
+  background: #0c0b09;
   border: 1px solid var(--line); box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.04);
   transition: transform .4s var(--ease-spring), border-color .3s var(--ease), box-shadow .3s var(--ease);
 }
 .brand:hover .brand-logo-box { transform: scale(1.05) rotate(-3deg); border-color: var(--accent); box-shadow: var(--accent-glow); }
-.brand-logo { width: 28px; height: 28px; flex: 0 0 auto; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(var(--accent-rgb),.45)); }
+.brand-logo { width: 100%; height: 100%; display: block; object-fit: cover; }
 .brand-text { min-width: 0; }
 .brand strong { display: block; font-size: 15px; font-weight: 800; letter-spacing: .4px; line-height: 1.15; text-transform: uppercase; }
 .brand-accent { color: var(--accent); font-weight: 800; }
@@ -611,7 +611,7 @@ textarea.url-multi { min-height: 78px; }
   padding: 32px 28px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; text-align: center;
   animation: login-in .5s var(--ease-out) both; }
 @keyframes login-in { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
-.login-logo { width: 64px; height: 64px; object-fit: contain; margin: 0 auto 14px; filter: drop-shadow(0 6px 22px rgba(var(--accent-rgb),.5)); animation: logo-float 4s var(--ease) infinite; }
+.login-logo { width: 248px; height: auto; max-width: 80%; object-fit: contain; display: block; margin: 0 auto 16px; border-radius: 16px; filter: drop-shadow(0 10px 32px rgba(var(--accent-rgb),.4)); animation: logo-float 4s var(--ease) infinite; }
 @keyframes logo-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 .login-err { animation: shake .4s var(--ease); }
 .login-card h1 { font-size: 22px; margin: 0 0 4px; }
