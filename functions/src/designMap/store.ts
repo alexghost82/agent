@@ -1,7 +1,12 @@
 import { db } from "../firebase";
 import { serverTime, logEvent } from "../util";
 import type { DesignMap, DesignMapEdge, DesignMapNode } from "./types";
-import { buildInitialDesignMap, type InitialMapProject } from "./initialMap";
+import {
+  buildInitialDesignMap,
+  buildDesignMapFromScanGraph,
+  type InitialMapProject,
+  type ScanGraphInput
+} from "./initialMap";
 
 const COLLECTION = "design_maps";
 
@@ -123,13 +128,29 @@ export async function patchDesignMap(
 }
 
 // Returns the existing owned map, or builds + persists an initial one.
+//
+// When `loadScanGraph` is supplied it is consulted ONLY on first seed (never
+// when a map already exists, so it costs nothing on the common path). If it
+// yields a Project Intelligence scan graph, the initial map is derived from that
+// rich graph; otherwise we fall back to the thin project-field seed. The loader
+// is injected (rather than imported here) to keep this module decoupled from the
+// project-intelligence package.
 export async function ensureInitialDesignMap(
   userId: string,
-  project: InitialMapProject
+  project: InitialMapProject,
+  loadScanGraph?: () => Promise<ScanGraphInput | null>
 ): Promise<DesignMap> {
   const existing = await getDesignMap(userId, project.id);
   if (existing) return existing;
 
-  const { nodes, edges } = buildInitialDesignMap(project);
-  return saveDesignMap(userId, project.id, { nodes, edges });
+  let built: { nodes: DesignMapNode[]; edges: DesignMapEdge[] } | null = null;
+  if (loadScanGraph) {
+    const graph = await loadScanGraph();
+    if (graph && graph.nodes.length > 0) {
+      built = buildDesignMapFromScanGraph(project, graph);
+    }
+  }
+  if (!built) built = buildInitialDesignMap(project);
+
+  return saveDesignMap(userId, project.id, built);
 }

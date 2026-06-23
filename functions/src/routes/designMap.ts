@@ -5,6 +5,7 @@ import { sendError, notFound, badRequest } from "../errors";
 import { saveDesignMap, patchDesignMap, ensureInitialDesignMap } from "../designMap/store";
 import { parseDesignMapPayload, parseDesignMapPatch } from "../designMap/validators";
 import type { DesignMapNode, DesignMapEdge } from "../designMap/types";
+import { readLatestCompletedScanGraph } from "../project-intelligence/storage/persist";
 
 export const designMapRouter = Router();
 
@@ -33,6 +34,14 @@ function projectSeed(id: string, data: FirebaseFirestore.DocumentData | undefine
     repoUrl: str(data?.repoUrl),
     skillIds: Array.isArray(data?.skillIds) ? (data?.skillIds as string[]) : []
   };
+}
+
+// Lazy loader for the latest completed scan's graph, used to seed the design map
+// from real Project Intelligence data on first open. Injected into
+// ensureInitialDesignMap so it's only invoked when a map is actually being
+// seeded (never when one already exists).
+function scanGraphLoader(userId: string, projectId: string) {
+  return () => readLatestCompletedScanGraph(userId, projectId);
 }
 
 // Pick the node new skill/podskill nodes should hang off of: prefer the
@@ -71,7 +80,11 @@ designMapRouter.get("/projects/:id/design-map", async (req: AuthedRequest, res: 
       sendError(req, res, notFound());
       return;
     }
-    const map = await ensureInitialDesignMap(req.userId!, projectSeed(projectId, project.data()));
+    const map = await ensureInitialDesignMap(
+      req.userId!,
+      projectSeed(projectId, project.data()),
+      scanGraphLoader(req.userId!, projectId)
+    );
     res.json({ map });
   } catch (err) {
     sendError(req, res, err);
@@ -139,7 +152,11 @@ designMapRouter.post("/projects/:id/design-map/add-skill", async (req: AuthedReq
     }
     const skill = skillDoc.data() ?? {};
 
-    const map = await ensureInitialDesignMap(req.userId!, projectSeed(projectId, project.data()));
+    const map = await ensureInitialDesignMap(
+      req.userId!,
+      projectSeed(projectId, project.data()),
+      scanGraphLoader(req.userId!, projectId)
+    );
     const nodes: DesignMapNode[] = [...map.nodes];
     const edges: DesignMapEdge[] = [...map.edges];
 
@@ -256,7 +273,11 @@ designMapRouter.post("/projects/:id/design-map/add-podskill", async (req: Authed
       return;
     }
 
-    const map = await ensureInitialDesignMap(req.userId!, projectSeed(projectId, project.data()));
+    const map = await ensureInitialDesignMap(
+      req.userId!,
+      projectSeed(projectId, project.data()),
+      scanGraphLoader(req.userId!, projectId)
+    );
     const nodes: DesignMapNode[] = [...map.nodes];
     const edges: DesignMapEdge[] = [...map.edges];
 
