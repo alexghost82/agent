@@ -33,10 +33,23 @@ export interface SkillCandidate {
 
 // How many context chunks each extraction batch feeds the model. Several
 // batches let extract-skills traverse the WHOLE topic corpus instead of a
-// single 16-fragment window (Epic 2.3).
-const EXTRACT_BATCH_CHUNKS = 12;
+// single 16-fragment window (Epic 2.3). Read at CALL-TIME so it is env-tunable
+// (`SKILL_EXTRACT_BATCH_CHUNKS`) without a rebuild; defaults to the historical
+// value of 12, so behaviour is unchanged unless the env var is set.
+function extractBatchChunks(): number {
+  const n = Number(process.env.SKILL_EXTRACT_BATCH_CHUNKS);
+  return Number.isFinite(n) && n > 0 ? n : 12;
+}
+
 // Upper bound on batches so a huge corpus can't fan out into unbounded LLM cost.
-const EXTRACT_MAX_BATCHES = 8;
+// Env-tunable via `SKILL_EXTRACT_MAX_BATCHES` (default 8). The optional
+// `SKILL_EXTRACT_FULL=1` "full pass" mode doubles the effective ceiling so large
+// topics are covered more completely — cost stays bounded because we still cap.
+function extractMaxBatches(): number {
+  const n = Number(process.env.SKILL_EXTRACT_MAX_BATCHES);
+  const base = Number.isFinite(n) && n > 0 ? n : 8;
+  return process.env.SKILL_EXTRACT_FULL === "1" ? base * 2 : base;
+}
 
 // Parse + normalize one batch's raw LLM output into skill candidates.
 export function parseSkillCandidates(raw: string): SkillCandidate[] {
@@ -136,10 +149,12 @@ export async function extractSkillsForTopic(
     `${topicName} pitfalls, trade-offs and lessons learned`,
     topicName
   ].filter((s) => s.trim());
+  const batchChunks = extractBatchChunks();
+  const maxBatches = extractMaxBatches();
   const context = await gatherContext(
     subqueries,
     { userId, topicId },
-    { perQuery: 16, maxChunks: EXTRACT_BATCH_CHUNKS * EXTRACT_MAX_BATCHES, charBudget: 120_000 }
+    { perQuery: 16, maxChunks: batchChunks * maxBatches, charBudget: 120_000 }
   );
   if (!context.length) {
     throw badRequest("No knowledge in this topic yet. Add sources and learn them first.");
@@ -148,9 +163,9 @@ export async function extractSkillsForTopic(
   // Split the gathered corpus into batches and accumulate candidates across all
   // of them so extraction reflects everything learned, not a slice.
   const batches: ScoredChunk[][] = [];
-  for (let i = 0; i < context.length; i += EXTRACT_BATCH_CHUNKS) {
-    batches.push(context.slice(i, i + EXTRACT_BATCH_CHUNKS));
-    if (batches.length >= EXTRACT_MAX_BATCHES) break;
+  for (let i = 0; i < context.length; i += batchChunks) {
+    batches.push(context.slice(i, i + batchChunks));
+    if (batches.length >= maxBatches) break;
   }
 
   const rawCandidates: SkillCandidate[] = [];
