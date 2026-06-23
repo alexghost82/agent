@@ -600,6 +600,12 @@ textarea.url-multi { min-height: 78px; }
    and the actions sit in an elegant footer below it (not crammed beside it). */
 .proj-item { flex-direction: column; align-items: stretch; gap: 12px; }
 
+/* Reference-style row: icon tile on the left, content + footer stacked on the right. */
+.proj-row { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: start; }
+.proj-row .task-main { grid-column: 2; }
+.proj-row .proj-footer { grid-column: 2; }
+.proj-ic { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
+
 .proj-item .task-main > span { overflow-wrap: anywhere; }
 .proj-summary { margin-top: 12px; min-width: 0; }
 .proj-summary .md { overflow-wrap: anywhere; word-break: break-word; }

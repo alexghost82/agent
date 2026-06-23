@@ -217,6 +217,12 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
               const ghRequestId = ghOutput?.requestId ? String(ghOutput.requestId) : "";
               const mapStatus = String(p.mapStatus || "none");
               const mapBuilding = ["queued", "building"].includes(mapStatus);
+              const pillCls =
+                status === "error"
+                  ? "pill-err"
+                  : ["ready", "done", "indexed", "connected", "complete"].includes(status)
+                    ? "pill-ok"
+                    : "pill-warn";
 
               if (editId === id) {
                 return (
@@ -250,7 +256,10 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
               }
 
               return (
-                <li key={id} className="proj-item">
+                <li key={id} className="proj-item proj-row">
+                  <span className="dt-ic proj-ic">
+                    <Icon name="project" />
+                  </span>
                   <div className="task-main">
                     <b>{String(p.name)}</b>
                     <span>
@@ -302,7 +311,10 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
                     ) : null}
                   </div>
                   <div className="proj-footer">
-                    <span className={`status status-${status}`}>{t[`ingest_${status}`] || status}</span>
+                    <span className={`pill ${pillCls}`}>
+                      <span className="pill-dot" />
+                      {t[`ingest_${status}`] || status}
+                    </span>
                     <div className="row-actions">
                     <button
                       className="ghost sm"
