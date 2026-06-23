@@ -155,15 +155,66 @@ export function parseRepoUrl(input: string): { owner: string; repo: string } {
   throw new Error("Invalid GitHub repository URL");
 }
 
+// First path segment on github.com that is a reserved/product route rather than
+// an `<owner>` — these must NOT be treated as repositories (they are rendered
+// web pages). `gist`/`raw` are also handled by the host check below.
+const GITHUB_RESERVED_OWNERS = new Set([
+  "gist", "raw", "settings", "marketplace", "sponsors", "features", "about",
+  "pricing", "login", "join", "logout", "orgs", "topics", "collections",
+  "explore", "notifications", "pulls", "issues", "search", "apps", "contact",
+  "site", "security", "enterprise", "team", "customer-stories", "readme",
+  "new", "watching", "stars", "dashboard", "account"
+]);
+
+// Classify a pasted resource URL so ingestion can route GitHub repositories to
+// code-aware indexing instead of scraping the rendered HTML landing page.
+//
+// A URL is `github_repo` ONLY when its host is exactly github.com (or www.) and
+// the path starts with `<owner>/<repo>` for a non-reserved owner. The `.git`
+// suffix and `/tree/...`, `/blob/...` deep links all still resolve to the same
+// owner/repo. Everything else — gists (gist.github.com), single raw files
+// (raw.githubusercontent.com), GitHub product pages, and any non-GitHub URL —
+// is `web`. Pure + deterministic so it is unit-testable with no network.
+export function classifyResourceUrl(
+  url: string
+): { kind: "github_repo" | "web"; owner?: string; repo?: string } {
+  let host = "";
+  let segments: string[] = [];
+  try {
+    const u = new URL(String(url).trim());
+    host = u.hostname.toLowerCase().replace(/^www\./, "");
+    segments = u.pathname.split("/").filter(Boolean);
+  } catch {
+    return { kind: "web" };
+  }
+  if (host !== "github.com") return { kind: "web" };
+  if (segments.length < 2) return { kind: "web" };
+  if (GITHUB_RESERVED_OWNERS.has(segments[0].toLowerCase())) return { kind: "web" };
+  try {
+    const { owner, repo } = parseRepoUrl(url);
+    if (!owner || !repo) return { kind: "web" };
+    return { kind: "github_repo", owner, repo };
+  } catch {
+    return { kind: "web" };
+  }
+}
+
 const TEXT_EXTENSIONS = new Set([
   "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "md", "mdx", "txt", "yml", "yaml",
   "py", "rb", "go", "rs", "java", "kt", "kts", "swift", "c", "h", "cpp", "hpp", "cc",
   "cs", "php", "sh", "bash", "zsh", "sql", "html", "htm", "css", "scss", "less",
-  "vue", "svelte", "toml", "ini", "env", "xml", "gradle", "dockerfile", "graphql", "prisma"
+  "vue", "svelte", "toml", "ini", "env", "xml", "gradle", "dockerfile", "graphql", "prisma",
+  // Notebooks, IaC/config, and additional languages (broaden code coverage).
+  "ipynb", "proto", "tf", "tfvars", "hcl", "cfg", "conf", "properties",
+  "editorconfig", "sol", "r", "m", "mm", "dart", "lua", "ex", "exs", "erl",
+  "clj", "cljs", "edn", "scala", "jl", "tsv", "csv", "rst", "adoc", "mk", "cmake"
 ]);
 
 const TEXT_FILENAMES = new Set([
-  "dockerfile", "makefile", "readme", "license", ".gitignore", ".env.example", "procfile"
+  "dockerfile", "makefile", "readme", "license", ".gitignore", ".env.example", "procfile",
+  // Makefile / build variants and common dot/underscore config files.
+  "gnumakefile", "cmakelists.txt", ".dockerignore", ".editorconfig",
+  ".npmrc", ".nvmrc", ".prettierrc", ".eslintrc", ".babelrc"
 ]);
 
 export function isTextFile(path: string): boolean {
