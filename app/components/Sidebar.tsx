@@ -26,11 +26,9 @@ export function Sidebar({ g }: { g: GhostData }) {
         </div>
       </div>
 
-      <p className="nav-label">{t.workflow}</p>
       <nav className="nav">
         {STEP_KEYS.map((key) => (
           <button key={key} className={`nav-item ${active === key ? "is-active" : ""}`} onClick={() => setActive(key)}>
-            <span className="nav-num">{STEP_META[key].n}</span>
             <span className="nav-ic">
               <Icon name={STEP_META[key].icon} />
             </span>
