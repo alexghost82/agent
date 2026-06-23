@@ -32,7 +32,7 @@ describe("SkillsPanel", () => {
   it("renders the panel heading and explainer from the EN dictionary", () => {
     render(<SkillsPanel g={makeG()} />);
     expect(screen.getByText(DICT.en.skillsExplain)).toBeInTheDocument();
-    expect(screen.getByText(/Agent skills/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Agent skills/ })).toBeInTheDocument();
   });
 
   it("shows the empty state when there are no skills", () => {

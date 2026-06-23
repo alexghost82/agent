@@ -7,9 +7,12 @@ import { downloadZip } from "../../zip";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { MapModal } from "../MapModal";
+import { Modal } from "../Modal";
 
 export function SkillsPanel({ g }: { g: GhostData }) {
   const { t, topics, skills, selectedTopic, setSelectedTopic, loading, output, stats, query } = g;
+
+  const [showExtract, setShowExtract] = useState(false);
 
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -59,6 +62,14 @@ export function SkillsPanel({ g }: { g: GhostData }) {
     setOpenGroupId(null);
     setEditId(null);
   }
+
+  // Right-rail overview stats (over the full skill set, not the filtered view).
+  const overview = useMemo(() => {
+    const learned = skills.filter((s) => String(s.source || "") === "learned").length;
+    const cats = new Set(skills.map((s) => String(s.topicId || "\u0000__none__"))).size;
+    return { total: skills.length, learned, manual: skills.length - learned, cats };
+  }, [skills]);
+  const pct = (n: number) => (overview.total > 0 ? Math.round((n / overview.total) * 100) : 0);
 
   function startEdit(s: Json) {
     setEditId(String(s.id));
@@ -169,8 +180,108 @@ export function SkillsPanel({ g }: { g: GhostData }) {
 
   return (
     <section className="panel">
-      <div className="explain">{t.skillsExplain}</div>
-      <div className="form-card">
+      <div className="page-toolbar">
+        <div className="pt-left">
+          <span className="explain">{t.skillsExplain}</span>
+        </div>
+        <div className="pt-actions">
+          <button className="ghost" onClick={exportKnowledge} disabled={!skills.length}>
+            <Icon name="download" /> {t.exportSkills}
+          </button>
+          <button className="ghost" onClick={g.loadSkills}>
+            <Icon name="refresh" /> {t.refreshList}
+          </button>
+          <button className="primary" onClick={() => setShowExtract(true)}>
+            <Icon name="skills" /> {t.createSkillFromTopic}
+          </button>
+        </div>
+      </div>
+
+      <div className="page-grid">
+        <div className="pg-main">
+          <div className="list-head">
+            <h3>
+              {t.mySkills} ({skills.length})
+            </h3>
+          </div>
+          {skills.length ? (
+            <div className="skill-cat-grid" aria-label={t.skillCategories}>
+              {groups.map((group) => (
+                <button
+                  key={group.categoryId}
+                  type="button"
+                  className="skill-cat-tile"
+                  onClick={() => setOpenGroupId(group.categoryId)}
+                  aria-label={`${group.categoryName} (${group.skills.length})`}
+                >
+                  <span className="skill-cat-tile-name">{group.categoryName}</span>
+                  <span className="skill-cat-tile-count">{group.skills.length}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">{t.noSkills}</p>
+          )}
+          <ResultView k="skills" output={output} loading={loading} t={t} />
+        </div>
+
+        <aside className="pg-rail">
+          <div className="card">
+            <div className="card-head">
+              <h3>{t.overviewTitle}</h3>
+              <Icon name="skills" />
+            </div>
+            <div className="ov-grid">
+              <div className="ov-cell">
+                <span className="ov-num">{overview.total}</span>
+                <span className="ov-lbl">{t.mySkills}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{overview.cats}</span>
+                <span className="ov-lbl">{t.skillCategories}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{overview.learned}</span>
+                <span className="ov-lbl">{t.learnedTag}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{topics.length}</span>
+                <span className="ov-lbl">{t.topicSection}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <h3>{t.colType}</h3>
+            </div>
+            <div className="ov-bars">
+              <div className="ov-bar-row">
+                <span className="ov-bar-name">
+                  <span className="ov-dot" style={{ background: "var(--accent)" }} />
+                  {t.learnedTag}
+                </span>
+                <span className="ov-bar-val">{overview.learned}</span>
+                <span className="ov-bar-track">
+                  <span className="ov-bar-fill" style={{ width: `${pct(overview.learned)}%` }} />
+                </span>
+              </div>
+              <div className="ov-bar-row">
+                <span className="ov-bar-name">
+                  <span className="ov-dot" style={{ background: "var(--accent-2)" }} />
+                  {t.manualLabel}
+                </span>
+                <span className="ov-bar-val">{overview.manual}</span>
+                <span className="ov-bar-track">
+                  <span className="ov-bar-fill" style={{ width: `${pct(overview.manual)}%` }} />
+                </span>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <Modal open={showExtract} onClose={() => setShowExtract(false)} title={t.createSkillFromTopic} subtitle={t.skillsExplain}>
         <label>{t.selectTopic}</label>
         <select value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)}>
           <option value="">{"\u2014"}</option>
@@ -180,41 +291,19 @@ export function SkillsPanel({ g }: { g: GhostData }) {
             </option>
           ))}
         </select>
-        <button className="primary" onClick={() => g.extractSkills(selectedTopic)} disabled={loading.skills || !selectedTopic}>
+        <button
+          className="primary"
+          onClick={async () => {
+            await g.extractSkills(selectedTopic);
+            setShowExtract(false);
+          }}
+          disabled={loading.skills || !selectedTopic}
+          style={{ marginTop: 14 }}
+        >
           <Icon name="skills" /> {loading.skills ? t.extracting : t.createSkillFromTopic}
         </button>
-      </div>
-      <div className="list-head">
-        <h3>
-          {t.mySkills} ({skills.length})
-        </h3>
-        <div className="row-actions">
-          <button className="ghost sm" onClick={exportKnowledge} disabled={!skills.length}>
-            <Icon name="download" /> {t.exportSkills}
-          </button>
-          <button className="ghost sm" onClick={g.loadSkills}>
-            <Icon name="refresh" /> {t.refreshList}
-          </button>
-        </div>
-      </div>
-      {skills.length ? (
-        <div className="skill-cat-grid" aria-label={t.skillCategories}>
-          {groups.map((group) => (
-            <button
-              key={group.categoryId}
-              type="button"
-              className="skill-cat-tile"
-              onClick={() => setOpenGroupId(group.categoryId)}
-              aria-label={`${group.categoryName} (${group.skills.length})`}
-            >
-              <span className="skill-cat-tile-name">{group.categoryName}</span>
-              <span className="skill-cat-tile-count">{group.skills.length}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">{t.noSkills}</p>
-      )}
+      </Modal>
+
       <MapModal
         open={!!openGroup}
         title={openGroup ? `${openGroup.categoryName} (${openGroup.skills.length})` : ""}
@@ -227,7 +316,6 @@ export function SkillsPanel({ g }: { g: GhostData }) {
           </div>
         ) : null}
       </MapModal>
-      <ResultView k="skills" output={output} loading={loading} t={t} />
     </section>
   );
 }

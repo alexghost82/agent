@@ -7,6 +7,7 @@ import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
 import { ProjectMapModal } from "../ProjectMapModal";
+import { Modal } from "../Modal";
 import { Markdown } from "../../markdown";
 
 function IngestProgress({ p, t }: { p: Json; t: any }) {
@@ -48,6 +49,11 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
 
   const [skillSearch, setSkillSearch] = useState("");
 
+  // Modal visibility for the toolbar-driven create / token / skills flows.
+  const [showCreate, setShowCreate] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
+
   // Project Intelligence map (scan-driven).
   const [intelProject, setIntelProject] = useState<{ id: string; name: string } | null>(null);
 
@@ -77,6 +83,19 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
 
   const { page, setPage, pageCount, visible } = usePaged(filteredProjects, 6);
 
+  // Right-rail overview stats.
+  const stats = useMemo(() => {
+    const connected = projects.filter((p) => String(p.repoUrl || "")).length;
+    const mapReady = projects.filter((p) => String(p.mapStatus || "") === "ready").length;
+    return {
+      total: projects.length,
+      connected,
+      scratch: projects.length - connected,
+      mapReady
+    };
+  }, [projects]);
+  const pct = (n: number) => (stats.total > 0 ? Math.round((n / stats.total) * 100) : 0);
+
   async function createProject() {
     await g.createProject({
       name: pName.trim(),
@@ -90,6 +109,7 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
     setPDesc("");
     setPStack("");
     setPRepo("");
+    setShowCreate(false);
   }
 
   async function saveGithubToken() {
@@ -99,6 +119,7 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
       await g.saveGithubToken(ghToken);
       setGhToken("");
       setTokenMsg(t.tokenSaved);
+      setShowToken(false);
     } catch {
       setTokenMsg(t.requestFailed);
     }
@@ -139,63 +160,25 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
 
   return (
     <section className="panel">
-      <div className="explain">{t.projectExplain}</div>
-
-      <div className="form-card">
-        <div className="seg create-mode-seg">
-          <button
-            type="button"
-            className={createMode === "scratch" ? "on" : ""}
-            onClick={() => setCreateMode("scratch")}
-          >
-            {t.createScratchTab}
+      <div className="page-toolbar">
+        <div className="pt-left">
+          <span className="explain">{t.projectExplain}</span>
+        </div>
+        <div className="pt-actions">
+          <button className="ghost" onClick={() => setShowToken(true)}>
+            <Icon name="github" /> {t.githubSection}
           </button>
-          <button
-            type="button"
-            className={createMode === "repo" ? "on" : ""}
-            onClick={() => setCreateMode("repo")}
-          >
-            {t.createRepoTab}
+          <button className="ghost" onClick={() => setShowSkills(true)} disabled={!projects.length}>
+            <Icon name="skills" /> {t.skillsToUse}
+          </button>
+          <button className="primary" onClick={() => setShowCreate(true)}>
+            <Icon name="plus" /> {t.createProject}
           </button>
         </div>
-        <p className="muted url-hint">{createMode === "scratch" ? t.createScratchHint : t.repoModeHint}</p>
-        <div className="form-row">
-          <div>
-            <label>{t.nameLabel}</label>
-            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My SaaS" />
-          </div>
-          <div>
-            <label>{t.stackLabel}</label>
-            <input value={pStack} onChange={(e) => setPStack(e.target.value)} placeholder="Next.js, Firebase" />
-          </div>
-        </div>
-        <label>{t.descLabel}</label>
-        <textarea value={pDesc} onChange={(e) => setPDesc(e.target.value)} placeholder="What the project does" />
-        {createMode === "repo" ? (
-          <>
-            <label>{t.repoLabel}</label>
-            <input value={pRepo} onChange={(e) => setPRepo(e.target.value)} placeholder="https://github.com/you/repo" />
-          </>
-        ) : null}
-        <button
-          className="primary"
-          onClick={createProject}
-          disabled={loading.projectCreate || pName.trim().length < 2 || pDesc.trim().length < 5}
-        >
-          <Icon name="plus" /> {createMode === "scratch" ? t.createScratch : t.createProject}
-        </button>
       </div>
 
-      <div className="form-card">
-        <h3 className="card-title">{t.githubSection}</h3>
-        <label>{t.githubTokenLabel}</label>
-        <input type="password" value={ghToken} onChange={(e) => setGhToken(e.target.value)} placeholder={"ghp_\u2026"} autoComplete="off" />
-        <button className="ghost sm" onClick={saveGithubToken} disabled={!ghToken.trim()}>
-          <Icon name="github" /> {t.saveToken}
-        </button>
-        {tokenMsg ? <span className="badge-line">{tokenMsg}</span> : null}
-      </div>
-
+      <div className="page-grid">
+        <div className="pg-main">
       {projects.length ? (
         <>
           <div className="list-head">
@@ -364,8 +347,119 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
       ) : (
         <p className="muted">{t.noProjects}</p>
       )}
+      <ResultView k="projectCreate" output={output} loading={loading} t={t} />
+        </div>
 
-      <div className="form-card">
+        <aside className="pg-rail">
+          <div className="card">
+            <div className="card-head">
+              <h3>{t.overviewTitle}</h3>
+              <Icon name="overview" />
+            </div>
+            <div className="ov-grid">
+              <div className="ov-cell">
+                <span className="ov-num">{stats.total}</span>
+                <span className="ov-lbl">{t.steps.projects.title}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{stats.connected}</span>
+                <span className="ov-lbl">{t.connectedLabel}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{stats.scratch}</span>
+                <span className="ov-lbl">{t.scratchLabel}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{stats.mapReady}</span>
+                <span className="ov-lbl">{t.mapReadyLabel}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <h3>{t.colType}</h3>
+            </div>
+            <div className="ov-bars">
+              <div className="ov-bar-row">
+                <span className="ov-bar-name">
+                  <span className="ov-dot" style={{ background: "var(--accent)" }} />
+                  {t.connectedLabel}
+                </span>
+                <span className="ov-bar-val">{stats.connected}</span>
+                <span className="ov-bar-track">
+                  <span className="ov-bar-fill" style={{ width: `${pct(stats.connected)}%` }} />
+                </span>
+              </div>
+              <div className="ov-bar-row">
+                <span className="ov-bar-name">
+                  <span className="ov-dot" style={{ background: "var(--accent-2)" }} />
+                  {t.scratchLabel}
+                </span>
+                <span className="ov-bar-val">{stats.scratch}</span>
+                <span className="ov-bar-track">
+                  <span className="ov-bar-fill" style={{ width: `${pct(stats.scratch)}%` }} />
+                </span>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title={t.createProject} subtitle={createMode === "scratch" ? t.createScratchHint : t.repoModeHint}>
+        <div className="seg create-mode-seg">
+          <button
+            type="button"
+            className={createMode === "scratch" ? "on" : ""}
+            onClick={() => setCreateMode("scratch")}
+          >
+            {t.createScratchTab}
+          </button>
+          <button
+            type="button"
+            className={createMode === "repo" ? "on" : ""}
+            onClick={() => setCreateMode("repo")}
+          >
+            {t.createRepoTab}
+          </button>
+        </div>
+        <div className="form-row">
+          <div>
+            <label>{t.nameLabel}</label>
+            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My SaaS" />
+          </div>
+          <div>
+            <label>{t.stackLabel}</label>
+            <input value={pStack} onChange={(e) => setPStack(e.target.value)} placeholder="Next.js, Firebase" />
+          </div>
+        </div>
+        <label>{t.descLabel}</label>
+        <textarea value={pDesc} onChange={(e) => setPDesc(e.target.value)} placeholder="What the project does" />
+        {createMode === "repo" ? (
+          <>
+            <label>{t.repoLabel}</label>
+            <input value={pRepo} onChange={(e) => setPRepo(e.target.value)} placeholder="https://github.com/you/repo" />
+          </>
+        ) : null}
+        <button
+          className="primary"
+          onClick={createProject}
+          disabled={loading.projectCreate || pName.trim().length < 2 || pDesc.trim().length < 5}
+        >
+          <Icon name="plus" /> {createMode === "scratch" ? t.createScratch : t.createProject}
+        </button>
+      </Modal>
+
+      <Modal open={showToken} onClose={() => setShowToken(false)} title={t.githubSection}>
+        <label>{t.githubTokenLabel}</label>
+        <input type="password" value={ghToken} onChange={(e) => setGhToken(e.target.value)} placeholder={"ghp_\u2026"} autoComplete="off" />
+        <button className="primary" onClick={saveGithubToken} disabled={!ghToken.trim()}>
+          <Icon name="github" /> {t.saveToken}
+        </button>
+        {tokenMsg ? <span className="badge-line">{tokenMsg}</span> : null}
+      </Modal>
+
+      <Modal open={showSkills} onClose={() => setShowSkills(false)} title={t.skillsToUse}>
         <label>{t.selectProject}</label>
         <select value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)}>
           <option value="">{"\u2014"}</option>
@@ -427,8 +521,7 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
             {(output.saveSkills as any)?.saved ? <span className="badge-line">{t.skillsSaved}</span> : null}
           </>
         ) : null}
-      </div>
-      <ResultView k="projectCreate" output={output} loading={loading} t={t} />
+      </Modal>
 
       {intelProject ? (
         <ProjectMapModal
