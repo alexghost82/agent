@@ -383,6 +383,41 @@ button { font-family: inherit; cursor: pointer; }
 .dt-actions .ghost.sm { padding: 7px 9px; }
 .rtl .dt-name, .rtl .dt-sub { text-align: right; }
 
+/* Page toolbar + 2-column list layout (main table + right rail) */
+.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
+.page-toolbar .pt-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.page-toolbar .pt-actions { display: flex; align-items: center; gap: 10px; }
+.page-toolbar select { width: auto; min-width: 200px; margin: 0; }
+.page-grid { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
+.page-grid .pg-main { min-width: 0; }
+.page-grid .pg-rail { display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 1024px) { .page-grid { grid-template-columns: 1fr; } }
+
+/* Overview rail card: metric grid */
+.ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ov-cell { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; }
+.ov-num { display: block; font-size: 22px; font-weight: 800; line-height: 1; }
+.ov-lbl { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.ov-bars { display: flex; flex-direction: column; gap: 10px; }
+.ov-bar-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+.ov-bar-row .ov-bar-name { color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+.ov-bar-row .ov-bar-val { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ov-bar-track { grid-column: 1 / -1; height: 6px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-soft); overflow: hidden; }
+.ov-bar-fill { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.ov-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px;
+  background: rgba(4,5,8,.6); backdrop-filter: blur(4px); animation: fade .18s var(--ease) both; }
+.modal { width: 100%; max-width: 560px; max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); animation: rise .26s var(--ease-out) both; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+.modal-head h3 { margin: 0; font-size: 17px; }
+.modal-sub { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.modal-close { font-size: 18px; line-height: 1; }
+.modal-body { padding: 18px 20px 20px; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
 /* Per-panel column templates */
 .src-grid2 { grid-template-columns: minmax(0,1fr) 120px 130px 96px 96px; }
 .proj-grid2 { grid-template-columns: minmax(0,1fr) 140px 110px; }

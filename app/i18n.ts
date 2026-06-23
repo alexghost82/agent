@@ -35,6 +35,7 @@ export const DICT: Record<Lang, any> = {
     colStatus: "Status",
     statusSynced: "Synced",
     allTab: "All",
+    overviewTitle: "Overview",
     step: "Step",
     statLabels: {
       topics: "Topics",
@@ -377,6 +378,7 @@ export const DICT: Record<Lang, any> = {
     colStatus: "\u05e1\u05d8\u05d8\u05d5\u05e1",
     statusSynced: "\u05de\u05e1\u05d5\u05e0\u05db\u05e8\u05df",
     allTab: "\u05d4\u05db\u05dc",
+    overviewTitle: "\u05e1\u05e7\u05d9\u05e8\u05d4",
     workflow: "\u05ea\u05d4\u05dc\u05d9\u05da \u05e2\u05d1\u05d5\u05d3\u05d4 (\u05dc\u05e4\u05d9 \u05d4\u05e1\u05d3\u05e8)",
     refresh: "\u05e8\u05e2\u05e0\u05d5\u05df",
     step: "\u05e9\u05dc\u05d1",
@@ -721,6 +723,7 @@ export const DICT: Record<Lang, any> = {
     colStatus: "Статус",
     statusSynced: "Синхронизировано",
     allTab: "Все",
+    overviewTitle: "Обзор",
     workflow: "Рабочий процесс (по порядку)",
     refresh: "Обновить",
     step: "Шаг",

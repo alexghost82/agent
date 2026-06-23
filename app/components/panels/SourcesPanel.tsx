@@ -5,6 +5,7 @@ import type { GhostData } from "../../useGhostData";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
+import { Modal } from "../Modal";
 
 // Infer a coarse source type from its URL for the table's Type column / tabs.
 function srcType(url: string): { key: "web" | "github"; label: string; icon: string } {
@@ -21,6 +22,8 @@ export function SourcesPanel({ g }: { g: GhostData }) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [sourceTags, setSourceTags] = useState("");
   const [deepIngest, setDeepIngest] = useState(false);
+  const [showTopic, setShowTopic] = useState(false);
+  const [showSource, setShowSource] = useState(false);
 
   // Filter the learned sources by the global top-bar search (title or URL).
   const q = (query || "").trim().toLowerCase();
@@ -42,6 +45,15 @@ export function SourcesPanel({ g }: { g: GhostData }) {
   const webCount = useMemo(() => filtered.filter((s) => srcType(String(s.url || "")).key === "web").length, [filtered]);
   const ghCount = useMemo(() => filtered.filter((s) => srcType(String(s.url || "")).key === "github").length, [filtered]);
 
+  // Totals across all sources (for the right-rail overview, not search-scoped).
+  const allWeb = useMemo(() => sources.filter((s) => srcType(String(s.url || "")).key === "web").length, [sources]);
+  const allGh = useMemo(() => sources.filter((s) => srcType(String(s.url || "")).key === "github").length, [sources]);
+  const totalChunks = useMemo(
+    () => sources.reduce((sum, s) => sum + Number(s.chunkCount ?? s.chunks ?? 0), 0),
+    [sources]
+  );
+  const pct = (n: number) => (sources.length ? `${Math.round((n / sources.length) * 100)}%` : "0%");
+
   const { page, setPage, pageCount, visible } = usePaged(typed, 8);
 
   async function createTopic() {
@@ -49,7 +61,9 @@ export function SourcesPanel({ g }: { g: GhostData }) {
     await g.createTopic(newTopicName, newTopicDesc);
     setNewTopicName("");
     setNewTopicDesc("");
+    setShowTopic(false);
   }
+
   // Accept several resource URLs at once: one per line, or separated by commas
   // / whitespace. A single URL keeps using the original single-source path.
   const parsedUrls = sourceUrl
@@ -67,87 +81,39 @@ export function SourcesPanel({ g }: { g: GhostData }) {
     }
     setSourceUrl("");
     setSourceTags("");
+    setShowSource(false);
   }
 
   return (
     <section className="panel">
-      <div className="explain">{t.sourcesExplain}</div>
-
-      <div className="form-card">
-        <h3 className="card-title">{t.topicSection}</h3>
-        <div className="form-row">
-          <div>
-            <label>{t.newTopicName}</label>
-            <input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} placeholder="Authentication" />
-          </div>
-          <div>
-            <label>{t.newTopicDesc}</label>
-            <input value={newTopicDesc} onChange={(e) => setNewTopicDesc(e.target.value)} placeholder="JWT, OAuth, sessions" />
-          </div>
+      <div className="page-toolbar">
+        <div className="pt-left">
+          <select value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} aria-label={t.selectTopic}>
+            <option value="">{t.selectTopic}</option>
+            {topics.map((tp) => (
+              <option key={String(tp.id)} value={String(tp.id)}>
+                {String(tp.name)}
+              </option>
+            ))}
+          </select>
         </div>
-        <button className="primary" onClick={createTopic} disabled={newTopicName.trim().length < 2}>
-          <Icon name="plus" /> {t.createTopic}
-        </button>
+        <div className="pt-actions">
+          <button className="ghost" onClick={() => setShowTopic(true)}>
+            <Icon name="plus" /> {t.createTopic}
+          </button>
+          <button className="primary" onClick={() => setShowSource(true)} disabled={!selectedTopic}>
+            <Icon name="plus" /> {t.addSource}
+          </button>
+        </div>
       </div>
 
-      <div className="form-card">
-        <label>{t.selectTopic}</label>
-        <select value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)}>
-          <option value="">{"\u2014"}</option>
-          {topics.map((tp) => (
-            <option key={String(tp.id)} value={String(tp.id)}>
-              {String(tp.name)}
-            </option>
-          ))}
-        </select>
-        {!topics.length ? <p className="muted">{t.noTopics}</p> : null}
-        {selectedTopic ? (
-          <>
-            <label>{t.urlLabel}</label>
-            <textarea
-              className="url-multi"
-              value={sourceUrl}
-              onChange={(e) => setSourceUrl(e.target.value)}
-              placeholder={"https://docs.example.com/guide\nhttps://example.com/blog/article"}
-              rows={3}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addSource();
-              }}
-            />
-            <p className="muted url-hint">{t.urlMultiHint}</p>
-            <p className="muted url-hint">{t.githubSourceHint}</p>
-            <label className="deep-toggle">
-              <input
-                type="checkbox"
-                checked={deepIngest}
-                onChange={(e) => setDeepIngest(e.target.checked)}
-              />
-              <span>{t.deepIngestLabel}</span>
-            </label>
-            <p className="muted url-hint">{t.deepIngestHint}</p>
-            <label>{t.tagsLabel}</label>
-            <input value={sourceTags} onChange={(e) => setSourceTags(e.target.value)} placeholder="docs, api" />
-            <button className="primary" onClick={addSource} disabled={loading.sources || !parsedUrls.length}>
-              <Icon name="plus" />{" "}
-              {loading.sources ? t.learning : parsedUrls.length > 1 ? t.addSourcesMulti : t.addSource}
-            </button>
-          </>
-        ) : (
-          <p className="muted">{t.topicRequired}</p>
-        )}
-      </div>
-
-      {selectedTopic ? (
-        <>
-          <div className="list-head">
-            <h3>
-              {t.learnedSources} ({filtered.length})
-            </h3>
-            <button className="ghost sm" onClick={() => g.loadSources(selectedTopic)}>
-              <Icon name="refresh" /> {t.refreshList}
-            </button>
-          </div>
-          {!sources.length ? (
+      <div className="page-grid">
+        <div className="pg-main">
+          {!topics.length ? (
+            <p className="muted">{t.noTopics}</p>
+          ) : !selectedTopic ? (
+            <p className="muted">{t.topicRequired}</p>
+          ) : !sources.length ? (
             <p className="muted">{t.noSources}</p>
           ) : !filtered.length ? (
             <p className="muted">{t.searchEmpty}</p>
@@ -240,9 +206,99 @@ export function SourcesPanel({ g }: { g: GhostData }) {
               </div>
             </>
           )}
-        </>
-      ) : null}
-      <ResultView k="sources" output={output} loading={loading} t={t} />
+
+          <ResultView k="sources" output={output} loading={loading} t={t} />
+        </div>
+
+        <aside className="pg-rail">
+          <div className="card">
+            <div className="card-head">
+              <h3>{t.overviewTitle}</h3>
+              <Icon name="overview" />
+            </div>
+            <div className="ov-grid">
+              <div className="ov-cell">
+                <span className="ov-num">{sources.length}</span>
+                <span className="ov-lbl">{t.learnedSources}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{topics.length}</span>
+                <span className="ov-lbl">{t.topicSection}</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{allWeb}</span>
+                <span className="ov-lbl">Web</span>
+              </div>
+              <div className="ov-cell">
+                <span className="ov-num">{totalChunks.toLocaleString()}</span>
+                <span className="ov-lbl">{t.chunksUnit}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <h3>{t.colType}</h3>
+            </div>
+            <div className="ov-bars">
+              <div className="ov-bar-row">
+                <span className="ov-bar-name">
+                  <span className="ov-dot" style={{ background: "var(--accent)" }} /> Web
+                </span>
+                <span className="ov-bar-val">{allWeb}</span>
+                <span className="ov-bar-track">
+                  <span className="ov-bar-fill" style={{ width: pct(allWeb) }} />
+                </span>
+              </div>
+              <div className="ov-bar-row">
+                <span className="ov-bar-name">
+                  <span className="ov-dot" style={{ background: "var(--accent-2)" }} /> GitHub
+                </span>
+                <span className="ov-bar-val">{allGh}</span>
+                <span className="ov-bar-track">
+                  <span className="ov-bar-fill" style={{ width: pct(allGh) }} />
+                </span>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <Modal open={showTopic} onClose={() => setShowTopic(false)} title={t.createTopic} subtitle={t.topicSection}>
+        <label>{t.newTopicName}</label>
+        <input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} placeholder="Authentication" autoFocus />
+        <label>{t.newTopicDesc}</label>
+        <input value={newTopicDesc} onChange={(e) => setNewTopicDesc(e.target.value)} placeholder="JWT, OAuth, sessions" />
+        <button className="primary" onClick={createTopic} disabled={newTopicName.trim().length < 2} style={{ marginTop: 14 }}>
+          <Icon name="plus" /> {t.createTopic}
+        </button>
+      </Modal>
+
+      <Modal open={showSource} onClose={() => setShowSource(false)} title={t.addSource} subtitle={t.urlMultiHint}>
+        <label>{t.urlLabel}</label>
+        <textarea
+          className="url-multi"
+          value={sourceUrl}
+          onChange={(e) => setSourceUrl(e.target.value)}
+          placeholder={"https://docs.example.com/guide\nhttps://example.com/blog/article"}
+          rows={3}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addSource();
+          }}
+        />
+        <p className="muted url-hint">{t.githubSourceHint}</p>
+        <label className="deep-toggle">
+          <input type="checkbox" checked={deepIngest} onChange={(e) => setDeepIngest(e.target.checked)} />
+          <span>{t.deepIngestLabel}</span>
+        </label>
+        <p className="muted url-hint">{t.deepIngestHint}</p>
+        <label>{t.tagsLabel}</label>
+        <input value={sourceTags} onChange={(e) => setSourceTags(e.target.value)} placeholder="docs, api" />
+        <button className="primary" onClick={addSource} disabled={loading.sources || !parsedUrls.length} style={{ marginTop: 14 }}>
+          <Icon name="plus" /> {loading.sources ? t.learning : parsedUrls.length > 1 ? t.addSourcesMulti : t.addSource}
+        </button>
+      </Modal>
     </section>
   );
 }
