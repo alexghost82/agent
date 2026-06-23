@@ -7,8 +7,23 @@ import { AppError } from "./errors";
 
 export const GITHUB_API = "https://api.github.com";
 
-// Hard cap on a single file's fetched content (cost / memory guard).
+// Default cap on a single file's fetched content (cost / memory guard). Callers
+// may override this per request, but never above MAX_FILE_BYTES_CEILING.
 export const MAX_FILE_BYTES = 100_000;
+
+// Absolute upper bound on a single file's fetched content, regardless of any
+// env override. Guards against a misconfigured GITHUB_MAX_FILE_BYTES blowing up
+// memory / cost on a pathologically large file.
+export const MAX_FILE_BYTES_CEILING = 2_000_000;
+
+// Resolve the configurable per-file byte budget from the environment, clamped to
+// the hard ceiling. Used as the default bound for both the tree size filter and
+// fetchRawFile truncation so they stay in sync.
+export function resolveMaxFileBytes(): number {
+  const raw = Number(process.env.GITHUB_MAX_FILE_BYTES);
+  const value = Number.isFinite(raw) && raw > 0 ? raw : MAX_FILE_BYTES;
+  return Math.min(value, MAX_FILE_BYTES_CEILING);
+}
 
 export function githubHeaders(token?: string): Record<string, string> {
   const h: Record<string, string> = {
@@ -33,15 +48,21 @@ export async function githubGetJson(path: string, token?: string): Promise<any> 
   return res.json();
 }
 
-// Fetch a single file's raw text content (truncated to MAX_FILE_BYTES). Returns
+// Fetch a single file's raw text content, truncated to `maxBytes` (defaults to
+// the env-configured budget, hard-clamped to MAX_FILE_BYTES_CEILING). Returns
 // null when the file is unavailable so callers can skip it gracefully.
 export async function fetchRawFile(
   owner: string,
   repo: string,
   ref: string,
   path: string,
-  token?: string
+  token?: string,
+  maxBytes?: number
 ): Promise<string | null> {
+  const limit = Math.min(
+    maxBytes && maxBytes > 0 ? maxBytes : resolveMaxFileBytes(),
+    MAX_FILE_BYTES_CEILING
+  );
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`, {
     method: "GET",
@@ -49,7 +70,7 @@ export async function fetchRawFile(
   });
   if (!res.ok) return null;
   const text = await res.text();
-  return text.slice(0, MAX_FILE_BYTES);
+  return text.slice(0, limit);
 }
 
 export interface RepoTreeNode {
