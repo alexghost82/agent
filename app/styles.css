@@ -350,6 +350,49 @@ button { font-family: inherit; cursor: pointer; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
 .list-foot .muted { font-size: 12px; }
 
+/* ---------- Reference list pattern (tabs + data table) ---------- */
+.list-tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin: 0 0 16px; }
+.list-tab { position: relative; background: transparent; border: 0; color: var(--muted); font: inherit; font-size: 13.5px; font-weight: 600;
+  padding: 10px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: color .15s var(--ease); }
+.list-tab:hover { color: var(--text); }
+.list-tab.on { color: var(--accent); }
+.list-tab.on::after { content: ""; position: absolute; inset-inline-start: 10px; inset-inline-end: 10px; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px; }
+.list-tab .cnt { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+.list-tab.on .cnt { color: var(--accent); border-color: rgba(var(--accent-rgb),.3); background: rgba(var(--accent-rgb),.12); }
+
+.data-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 4px; margin: 0 0 16px; overflow: hidden; }
+.dt-head, .dt-row { display: grid; align-items: center; gap: 12px; padding: 13px 14px; }
+.dt-head { color: var(--muted-2); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; border-bottom: 1px solid var(--line); }
+.dt-row { border-bottom: 1px solid var(--line-soft); transition: background .15s var(--ease); animation: rise .4s var(--ease-out) both; }
+.dt-row:last-child { border-bottom: 0; }
+.dt-row:hover { background: var(--panel-2); }
+.dt-cell-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dt-ic { flex: 0 0 auto; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px;
+  background: rgba(var(--accent-rgb),.1); border: 1px solid rgba(var(--accent-rgb),.18); color: var(--accent); }
+.dt-ic svg { width: 17px; height: 17px; }
+.dt-tt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dt-name { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-name a { color: inherit; text-decoration: none; }
+.dt-name a:hover { color: var(--accent); }
+.dt-sub { font-size: 12px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-type { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.dt-type svg { width: 15px; height: 15px; }
+.dt-muted { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dt-r { text-align: end; justify-self: end; }
+.dt-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.dt-actions .ghost.sm { padding: 7px 9px; }
+.rtl .dt-name, .rtl .dt-sub { text-align: right; }
+
+/* Per-panel column templates */
+.src-grid2 { grid-template-columns: minmax(0,1fr) 120px 130px 96px 96px; }
+.proj-grid2 { grid-template-columns: minmax(0,1fr) 140px 110px; }
+@media (max-width: 820px) {
+  .src-grid2 { grid-template-columns: minmax(0,1fr) auto; }
+  .src-grid2 > :nth-child(2), .src-grid2 > :nth-child(3), .src-grid2 > :nth-child(4) { display: none; }
+  .proj-grid2 { grid-template-columns: minmax(0,1fr) auto; }
+  .proj-grid2 > :nth-child(2) { display: none; }
+}
+
 .source-list, .task-list, .approval-list { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .source-list li { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 13px; padding: 12px 14px; transition: border-color .18s var(--ease), transform .18s var(--ease), box-shadow .18s var(--ease); }
 .source-list li:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-sm); }

@@ -6,6 +6,13 @@ import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
 
+// Infer a coarse source type from its URL for the table's Type column / tabs.
+function srcType(url: string): { key: "web" | "github"; label: string; icon: string } {
+  return url.toLowerCase().includes("github.com")
+    ? { key: "github", label: "GitHub", icon: "github" }
+    : { key: "web", label: "Web", icon: "link" };
+}
+
 export function SourcesPanel({ g }: { g: GhostData }) {
   const { t, topics, sources, selectedTopic, setSelectedTopic, loading, output, query } = g;
 
@@ -27,7 +34,15 @@ export function SourcesPanel({ g }: { g: GhostData }) {
     [sources, q]
   );
 
-  const { page, setPage, pageCount, visible } = usePaged(filtered, 8);
+  const [tab, setTab] = useState<"all" | "web" | "github">("all");
+  const typed = useMemo(
+    () => (tab === "all" ? filtered : filtered.filter((s) => srcType(String(s.url || "")).key === tab)),
+    [filtered, tab]
+  );
+  const webCount = useMemo(() => filtered.filter((s) => srcType(String(s.url || "")).key === "web").length, [filtered]);
+  const ghCount = useMemo(() => filtered.filter((s) => srcType(String(s.url || "")).key === "github").length, [filtered]);
+
+  const { page, setPage, pageCount, visible } = usePaged(typed, 8);
 
   async function createTopic() {
     if (newTopicName.trim().length < 2) return;
@@ -138,56 +153,67 @@ export function SourcesPanel({ g }: { g: GhostData }) {
             <p className="muted">{t.searchEmpty}</p>
           ) : (
             <>
-              <div className="list-table-head src-grid">
-                <span>{t.learnedSources}</span>
-                <span className="lt-meta">{t.chunksUnit}</span>
-                <span className="lt-act" />
+              <div className="list-tabs">
+                <button className={`list-tab ${tab === "all" ? "on" : ""}`} onClick={() => setTab("all")}>
+                  {t.allTab} <span className="cnt">{filtered.length}</span>
+                </button>
+                <button className={`list-tab ${tab === "web" ? "on" : ""}`} onClick={() => setTab("web")}>
+                  Web <span className="cnt">{webCount}</span>
+                </button>
+                <button className={`list-tab ${tab === "github" ? "on" : ""}`} onClick={() => setTab("github")}>
+                  GitHub <span className="cnt">{ghCount}</span>
+                </button>
               </div>
-              <ul className="source-list">
+
+              <div className="data-card">
+                <div className="dt-head src-grid2">
+                  <span>{t.learnedSources}</span>
+                  <span>{t.colType}</span>
+                  <span>{t.colStatus}</span>
+                  <span className="dt-r">{t.chunksUnit}</span>
+                  <span className="dt-r" />
+                </div>
                 {visible.map((s) => {
                   const id = String(s.id);
                   const reKey = `reingest-${id}`;
                   const delKey = `del-source-${id}`;
-                  const pages = Number(s.pages ?? s.pageCount ?? 0);
+                  const url = String(s.url || "");
+                  const ty = srcType(url);
+                  const chunks = Number(s.chunkCount ?? s.chunks ?? 0);
                   const isDeep = !!s.deep;
-                  const isSummarized = !!s.summarized;
-                  const showLimited = pages > 1 || isDeep;
                   return (
-                    <li key={id}>
-                      <span className="src-ic">
-                        <Icon name="link" />
-                      </span>
-                      <div className="src-main">
-                        <a href={String(s.url)} target="_blank" rel="noreferrer">
-                          {String(s.title || s.url)}
-                        </a>
-                        <span className="src-url">{String(s.url)}</span>
-                      </div>
-                      <span className="src-meta">
-                        <span className="src-chunks">
-                          {Number(s.chunkCount ?? s.chunks ?? 0)} {t.chunksUnit}
+                    <div className="dt-row src-grid2" key={id}>
+                      <div className="dt-cell-main">
+                        <span className="dt-ic">
+                          <Icon name={ty.icon} />
                         </span>
-                        {pages > 0 ? (
-                          <span className="src-pages">
-                            {pages} {t.pagesUnit}
+                        <span className="dt-tt">
+                          <span className="dt-name">
+                            <a href={url} target="_blank" rel="noreferrer">
+                              {String(s.title || url)}
+                            </a>
                           </span>
-                        ) : null}
-                        {isDeep ? <span className="src-badge deep">{t.deepBadge}</span> : null}
-                        {isSummarized ? (
-                          <span className="src-badge">{t.summarizedBadge}</span>
-                        ) : null}
-                        {showLimited ? (
-                          <span className="src-limited">{t.limitedHint}</span>
-                        ) : null}
+                          <span className="dt-sub">{url}</span>
+                        </span>
+                      </div>
+                      <span className="dt-type">
+                        <Icon name={ty.icon} /> {ty.label}
                       </span>
-                      <div className="row-actions">
+                      <span className="pill pill-ok">
+                        <span className="pill-dot" />
+                        {t.statusSynced}
+                        {isDeep ? <span className="src-badge deep">{t.deepBadge}</span> : null}
+                      </span>
+                      <span className="dt-muted dt-r">{chunks}</span>
+                      <div className="dt-actions">
                         <button
                           className="ghost sm"
                           onClick={() => g.reingestSource(s)}
                           disabled={!!loading[reKey]}
                           title={t.reingest}
+                          aria-label={t.reingest}
                         >
-                          <Icon name="refresh" /> {loading[reKey] ? t.reingesting : t.reingest}
+                          <Icon name="refresh" />
                         </button>
                         <button
                           className="ghost sm danger-btn"
@@ -201,13 +227,14 @@ export function SourcesPanel({ g }: { g: GhostData }) {
                           <Icon name="trash" />
                         </button>
                       </div>
-                    </li>
+                    </div>
                   );
                 })}
-              </ul>
+              </div>
+
               <div className="list-foot">
                 <span className="muted">
-                  {t.showingOf.replace("{a}", String(visible.length)).replace("{b}", String(filtered.length))}
+                  {t.showingOf.replace("{a}", String(visible.length)).replace("{b}", String(typed.length))}
                 </span>
                 <Pagination page={page} pageCount={pageCount} setPage={setPage} t={t} />
               </div>
