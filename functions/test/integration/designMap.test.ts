@@ -58,7 +58,11 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: design-map router", () => {
 
   it("GET seeds an initial map from the project on first open", async () => {
     const user = await seedUser();
-    const skillId = await addDoc("agent_skills", { userId: user.userId, skillName: "Auth" });
+    const skillId = await addDoc("agent_skills", {
+      userId: user.userId,
+      skillName: "Auth",
+      description: "How authentication works"
+    });
     const projectId = await addDoc("projects", {
       userId: user.userId,
       name: "Demo",
@@ -85,6 +89,11 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: design-map router", () => {
     expect(ids).toContain("feature-stack");
     expect(ids).toContain("feature-repo");
     expect(ids).toContain(`skill-${skillId}`);
+    // Seeded skill node carries the real skill name + description (not "Skill <id>").
+    const skillNode = map.nodes.find((n: any) => n.id === `skill-${skillId}`);
+    expect(skillNode.label).toBe("Auth");
+    expect(skillNode.description).toBe("How authentication works");
+    expect(skillNode.skillId).toBe(skillId);
     // The root project node carries the project id in its data bag.
     const root = map.nodes.find((n: any) => n.id === "project");
     expect(root.data.projectId).toBe(projectId);
@@ -92,6 +101,34 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: design-map router", () => {
     // Second open returns the SAME persisted map (no re-seed / version churn).
     const again = await srv.request("GET", `/projects/${projectId}/design-map`, { token: user.token });
     expect(again.body.map.version).toBe(1);
+  });
+
+  it("seeds only owned skills and skips unknown/unowned ids", async () => {
+    const user = await seedUser();
+    const other = await seedUser();
+    const ownedSkill = await addDoc("agent_skills", {
+      userId: user.userId,
+      skillName: "Owned",
+      description: "Mine"
+    });
+    const foreignSkill = await addDoc("agent_skills", { userId: other.userId, skillName: "Theirs" });
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "Skill filter",
+      skillIds: [ownedSkill, foreignSkill, "does-not-exist"]
+    });
+
+    const res = await srv.request("GET", `/projects/${projectId}/design-map`, { token: user.token });
+    expect(res.status).toBe(200);
+    const ids: string[] = res.body.map.nodes.map((n: any) => n.id);
+    // The owned skill is rendered with its real name...
+    expect(ids).toContain(`skill-${ownedSkill}`);
+    const ownedNode = res.body.map.nodes.find((n: any) => n.id === `skill-${ownedSkill}`);
+    expect(ownedNode.label).toBe("Owned");
+    expect(ownedNode.description).toBe("Mine");
+    // ...while the foreign and non-existent ids are skipped entirely.
+    expect(ids).not.toContain(`skill-${foreignSkill}`);
+    expect(ids).not.toContain("skill-does-not-exist");
   });
 
   it("never leaks another user's project (404 on GET)", async () => {
