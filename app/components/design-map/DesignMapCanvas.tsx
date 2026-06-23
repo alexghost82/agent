@@ -30,6 +30,25 @@ import type {
 const AUTOSAVE_DELAY_MS = 800;
 const DEFAULT_EDGE_TYPE: DesignMapEdgeType = "related_to";
 
+// Per-type default purpose so a freshly added node is never blank. The user can
+// always overwrite these in the sidebar; they exist to give each node meaning.
+const NODE_TYPE_DEFAULT_DESCRIPTIONS: Record<DesignMapNodeType, string> = {
+  project: "The root project this map describes.",
+  design_section: "Groups the project's design: its features, modules, screens and skills.",
+  feature: "A user-facing capability the project delivers.",
+  module: "A cohesive unit of functionality grouping related code.",
+  screen: "A UI screen or page the user interacts with.",
+  component: "A reusable UI component or building block.",
+  api_route: "A backend endpoint exposed to clients.",
+  database: "A data store or model the project persists to.",
+  flow: "A sequence of steps describing how a process runs.",
+  skill: "A reusable skill the agent can apply when building.",
+  podskill: "A focused sub-skill that refines a parent skill.",
+  decision: "A design or architecture decision and its rationale.",
+  risk: "A potential risk, blocker or concern to track.",
+  note: "A free-form note or annotation."
+};
+
 export interface DesignMapCanvasProps {
   nodes: DesignMapNode[];
   edges: DesignMapEdge[];
@@ -175,6 +194,7 @@ export function DesignMapCanvas({
         id,
         type,
         label: type,
+        description: NODE_TYPE_DEFAULT_DESCRIPTIONS[type],
         position: { x: 200 + (n % 6) * 40, y: 140 + (n % 6) * 40 }
       });
       setNodes((cur) => [...cur, rfNode]);

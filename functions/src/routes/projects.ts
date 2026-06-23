@@ -203,7 +203,10 @@ async function startScanHandler(req: AuthedRequest, res: Response): Promise<void
       return;
     }
     const body = ScanRequestSchema.parse(req.body ?? {});
-    const options = { maxDepth: body.depth, ai: body.ai ?? false };
+    // AI enrichment is ON by default so map nodes get meaningful
+    // descriptions/purpose; callers can still opt out with an explicit `ai: false`.
+    // enrichWithAI degrades gracefully (no throw, aiUsed=false) when no API key.
+    const options = { maxDepth: body.depth, ai: body.ai ?? true };
     const scanToken = crypto.randomBytes(12).toString("hex");
     const scanId = await createScan(req.userId!, doc.id, scanToken, options);
     await doc.ref.update({

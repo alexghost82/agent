@@ -69,6 +69,7 @@ export function buildInitialDesignMap(project: InitialMapProject): {
     id: "design_section",
     type: "design_section",
     label: "Design",
+    description: "Groups the project's design: its features, modules, screens and skills.",
     position: { x: COL_W, y: 0 },
     confidence: "manual"
   };
