@@ -317,12 +317,13 @@ export function useGhostData() {
   );
 
   const addSource = useCallback(
-    async (topicId: string, url: string, tags: string[]) =>
+    async (topicId: string, url: string, tags: string[], deep = false) =>
       run("sources", async () => {
         const r = await postJson("/learn", {
           topicId,
           url: url.trim(),
-          tags: tags.length ? tags : undefined
+          tags: tags.length ? tags : undefined,
+          deep: deep || undefined
         });
         loadSources(topicId);
         loadDashboard();
@@ -336,7 +337,7 @@ export function useGhostData() {
   // independent — a failing one does not abort the rest; per-URL results are
   // returned for display. The single-URL path keeps using addSource above.
   const addSources = useCallback(
-    async (topicId: string, urls: string[], tags: string[]) =>
+    async (topicId: string, urls: string[], tags: string[], deep = false) =>
       run("sources", async () => {
         const results: Json[] = [];
         let saved = 0;
@@ -348,7 +349,8 @@ export function useGhostData() {
             const r = await postJson("/learn", {
               topicId,
               url,
-              tags: tags.length ? tags : undefined
+              tags: tags.length ? tags : undefined,
+              deep: deep || undefined
             });
             saved += 1;
             results.push({ url, ok: true, ...r });
