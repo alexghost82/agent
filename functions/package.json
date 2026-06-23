@@ -30,6 +30,7 @@
     "firebase-admin": "^13.0.0",
     "firebase-functions": "^7.2.5",
     "openai": "^4.78.1",
+    "pdf-parse": "^2.4.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -39,5 +40,8 @@
     "tsx": "^4.22.4",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.61.0"
   }
 }
