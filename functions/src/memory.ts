@@ -233,6 +233,35 @@ export interface GatherContextOpts {
   charBudget?: number;
 }
 
+// Tunable defaults for context merging, read at CALL-TIME (not module load) so
+// they can be configured via env without rebuilding AND remain unit-testable by
+// toggling process.env between calls. An explicitly-passed caller opt always
+// takes precedence; env only fills in values the caller left unset. Defaults
+// equal the historical hard-coded values, so behaviour is unchanged unless the
+// env var is set.
+//
+// NOTE on recall: raising these knobs only re-ranks/keeps more of what the
+// vector backend already returned. With the in-memory cosine backend, recall is
+// fundamentally bounded by `candidateCap()` (the ceiling of candidates pulled
+// into memory for scoring). Tuning here cannot exceed that ceiling — the real
+// fix for large-corpus recall is the Firestore Vector Search migration
+// (`findNearest`, not bounded by VECTOR_CANDIDATE_CAP), which is intentionally
+// NOT implemented in this change.
+function configuredMaxChunks(): number {
+  const n = Number(process.env.CONTEXT_MAX_CHUNKS);
+  return Number.isFinite(n) && n > 0 ? n : 40;
+}
+
+function configuredCharBudget(): number {
+  const n = Number(process.env.CONTEXT_CHAR_BUDGET);
+  return Number.isFinite(n) && n > 0 ? n : 16000;
+}
+
+function configuredPerQuery(): number {
+  const n = Number(process.env.CONTEXT_PER_QUERY);
+  return Number.isFinite(n) && n > 0 ? n : 8;
+}
+
 // Pure merge/rank/budget step for a set of already-retrieved candidate chunks
 // (Epic 2.1). Kept side-effect free so it is unit-testable without Firestore:
 //   1. dedup by `id` (keeping the highest score seen for an id),
@@ -244,8 +273,8 @@ export function mergeContext(
   results: ScoredChunk[],
   opts?: { maxChunks?: number; charBudget?: number }
 ): ScoredChunk[] {
-  const maxChunks = opts?.maxChunks ?? 40;
-  const charBudget = opts?.charBudget ?? 16000;
+  const maxChunks = opts?.maxChunks ?? configuredMaxChunks();
+  const charBudget = opts?.charBudget ?? configuredCharBudget();
 
   const byId = new Map<string, ScoredChunk>();
   for (const c of results) {
@@ -287,7 +316,7 @@ export async function gatherContext(
     .filter(Boolean);
   if (!list.length) return [];
 
-  const perQuery = opts?.perQuery ?? 8;
+  const perQuery = opts?.perQuery ?? configuredPerQuery();
   // Run subqueries SEQUENTIALLY, not with Promise.all. The in-memory backend
   // loads every candidate chunk (each with a large embedding vector) into memory
   // to score it; running all subqueries in parallel keeps N candidate sets alive
