@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { SkillsPanel } from "./SkillsPanel";
 import { DICT } from "../../i18n";
 import type { GhostData } from "../../useGhostData";
@@ -46,7 +46,7 @@ describe("SkillsPanel", () => {
     expect(exportBtn).toBeDisabled();
   });
 
-  it("enables export and lists skills once data is present", () => {
+  it("enables export and lists skills (via category tile + modal) once data is present", () => {
     render(
       <SkillsPanel
         g={makeG({
@@ -54,6 +54,11 @@ describe("SkillsPanel", () => {
         })}
       />
     );
+    // Skills are now grouped into clickable category tiles; the tile shows a
+    // count, and the individual skill names render inside the modal it opens.
+    const tile = screen.getByRole("button", { name: /\(1\)/ });
+    expect(tile).toBeInTheDocument();
+    fireEvent.click(tile);
     expect(screen.getByText("Caching")).toBeInTheDocument();
     const exportBtn = screen.getByRole("button", { name: new RegExp(DICT.en.exportSkills) });
     expect(exportBtn).not.toBeDisabled();

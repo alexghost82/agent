@@ -11,7 +11,7 @@ import { log } from "./log";
 const EMBED_BATCH = Number(process.env.EMBED_BATCH_SIZE) || 96;
 const WRITE_BATCH = 400;
 // GitHub-into-topic ingestion bounds (mirrors github.ts repo ingestion).
-const GITHUB_INGEST_MAX_FILES = Number(process.env.GITHUB_INGEST_MAX_FILES) || 200;
+const GITHUB_INGEST_MAX_FILES = Number(process.env.GITHUB_INGEST_MAX_FILES) || 400;
 const GITHUB_FETCH_CONCURRENCY = Number(process.env.GITHUB_FETCH_CONCURRENCY) || 8;
 
 // Embeddings returned by `embedding()` / `embeddingBatch()` are ALREADY
