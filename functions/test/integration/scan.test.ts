@@ -83,6 +83,39 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: project scan", () => {
     expect(scan.projectId).toBe(projectId);
   });
 
+  it("POST /scan defaults AI enrichment ON when the caller omits `ai`", async () => {
+    const user = await seedUser();
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "Default AI proj",
+      description: "p",
+      repoUrl: "https://github.com/acme/widget"
+    });
+
+    // No body → `ai` unspecified should resolve to true server-side.
+    const res = await srv.request("POST", `/projects/${projectId}/scan`, { token: user.token });
+    expect(res.status).toBe(202);
+
+    const scan = (await db.collection("project_scans").doc(res.body.scanId).get()).data()!;
+    expect(scan.options.ai).toBe(true);
+  });
+
+  it("POST /scan honors an explicit `ai: false` opt-out", async () => {
+    const user = await seedUser();
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "Opt-out AI proj",
+      description: "p",
+      repoUrl: "https://github.com/acme/widget"
+    });
+
+    const res = await srv.request("POST", `/projects/${projectId}/scan`, { token: user.token, body: { ai: false } });
+    expect(res.status).toBe(202);
+
+    const scan = (await db.collection("project_scans").doc(res.body.scanId).get()).data()!;
+    expect(scan.options.ai).toBe(false);
+  });
+
   it("POST /scan without a connected repo is rejected", async () => {
     const user = await seedUser();
     const projectId = await addDoc("projects", { userId: user.userId, name: "No repo", description: "p" });
