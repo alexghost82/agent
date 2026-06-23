@@ -2,12 +2,17 @@ import { db } from "./firebase";
 import { embedding, embeddingBatch, llm } from "./ai";
 import { serverTime } from "./util";
 import { bumpCounter } from "./stats";
-import { chunkText, contentHash } from "./pure";
+import { chunkText, contentHash, classifyResourceUrl, isTextFile, parseRepoUrl } from "./pure";
 import { readUrl, crawlSite, type CrawledPage } from "./ssrf";
+import { MAX_FILE_BYTES, getRepoInfo, fetchTree, fetchRawFile } from "./githubFetch";
+import { mapWithConcurrency } from "./concurrency";
 import { log } from "./log";
 
 const EMBED_BATCH = Number(process.env.EMBED_BATCH_SIZE) || 96;
 const WRITE_BATCH = 400;
+// GitHub-into-topic ingestion bounds (mirrors github.ts repo ingestion).
+const GITHUB_INGEST_MAX_FILES = Number(process.env.GITHUB_INGEST_MAX_FILES) || 200;
+const GITHUB_FETCH_CONCURRENCY = Number(process.env.GITHUB_FETCH_CONCURRENCY) || 8;
 
 // Embeddings returned by `embedding()` / `embeddingBatch()` are ALREADY
 // canonicalized to TARGET_EMBED_DIM by the ai.ts normalization funnel (ADR-0008).
@@ -26,9 +31,14 @@ export type OutcomeKind = "design_outcome" | "plan_outcome" | "build_outcome" | 
 const OUTCOME_MIN_CHARS = 40;
 const OUTCOME_MAX_CHARS = 12000;
 const EMBED_INPUT_MAX = 8000;
-// Cap the model input for summarization so a large multi-page resource stays
-// within a sensible/cheap context window (Epic 1.1).
-const SUMMARY_INPUT_MAX = 12000;
+// Single-shot summary input cap (Epic 1.1). Resources LONGER than this are
+// summarized via a map-reduce pass instead of being truncated to this window.
+// Configurable via env so operators can tune cost/coverage.
+const SUMMARY_INPUT_MAX = Number(process.env.SUMMARY_INPUT_MAX) || 12000;
+// Map-reduce summary bounds: at most SUMMARY_MAX_CHUNKS map passes, each over a
+// SUMMARY_CHUNK_CHARS-sized slice of the full text, then one reduce/synthesis.
+const SUMMARY_MAX_CHUNKS = Number(process.env.SUMMARY_MAX_CHUNKS) || 8;
+const SUMMARY_CHUNK_CHARS = Number(process.env.SUMMARY_CHUNK_CHARS) || 8000;
 
 // Collects the set of existing chunk contentHashes for a given source URL so a
 // re-`/learn` of the same URL skips already-stored chunks. Equality-only query
@@ -74,6 +84,15 @@ export async function ingestUrl(opts: {
 }): Promise<IngestResult> {
   const { userId, topicId, url } = opts;
   const tags = opts.tags || [];
+
+  // GitHub-URL routing (improvement 1): a repo URL pasted into Sources/`/learn`
+  // is CODE, not a rendered web page. Scraping its HTML landing page indexes
+  // navigation chrome instead of source. Detect repo URLs and index the repo
+  // tree into topic-scoped chunks (chosen: full repo-into-topic indexing).
+  const classified = classifyResourceUrl(url);
+  if (classified.kind === "github_repo") {
+    return ingestGithubRepoIntoTopic({ userId, topicId, url, tags });
+  }
 
   const pages: CrawledPage[] = opts.deep ? await crawlSite(url) : [{ url, ...(await readUrl(url)) }];
   if (!pages.length) pages.push({ url, ...(await readUrl(url)) });
@@ -142,7 +161,9 @@ export async function ingestUrl(opts: {
   // structured summary chunk. Best-effort — never let it fail the ingest.
   let summarized = false;
   try {
-    const combined = pages.map((p) => p.text).join("\n\n").slice(0, 12000);
+    // Pass the FULL combined text — summarizeResource decides single-shot vs
+    // map-reduce based on length (improvement 3), instead of pre-truncating.
+    const combined = pages.map((p) => p.text).join("\n\n");
     const summary = await summarizeResource({
       userId,
       topicId,
@@ -157,6 +178,127 @@ export async function ingestUrl(opts: {
   }
 
   return { sourceId: sourceRef.id, title: rootTitle, url, pages: pages.length, chunks: saved, skipped, summarized };
+}
+
+// GitHub repo → topic ingestion (improvement 1, PREFERRED full-repo path).
+//
+// Mirrors the topic-scoped storage of `ingestUrl` (scope "topic" + topicId,
+// dedup by contentHash, sources doc + counter bumps, best-effort summary) but
+// sources its text from the repo's git tree via the read-only githubFetch
+// helpers instead of readUrl/crawlSite. Returns the SAME `IngestResult` shape so
+// `/learn` and the autonomous route stay backward-compatible. Unlike
+// `ingestRepo` (github.ts) which stores scope "project"/projectId, this keeps
+// every chunk topic-scoped so it lands in the user's topic knowledge base.
+export async function ingestGithubRepoIntoTopic(opts: {
+  userId: string;
+  topicId: string;
+  url: string;
+  tags?: string[];
+  token?: string;
+}): Promise<IngestResult> {
+  const { userId, topicId, url } = opts;
+  const tags = opts.tags || [];
+  const { owner, repo } = parseRepoUrl(url);
+  const repoLabel = `${owner}/${repo}`;
+
+  const repoInfo = await getRepoInfo(owner, repo, opts.token);
+  const branch: string = repoInfo.default_branch || "main";
+  const tree = await fetchTree(owner, repo, branch, opts.token);
+  const blobs: { path: string }[] = tree
+    .filter((n) => n.type === "blob" && isTextFile(n.path) && (n.size ?? 0) <= MAX_FILE_BYTES)
+    .map((n) => ({ path: n.path }))
+    .slice(0, GITHUB_INGEST_MAX_FILES);
+
+  const sourceRef = await db.collection("sources").add({
+    userId,
+    topicId,
+    url,
+    title: repoLabel,
+    tags,
+    deep: false,
+    kind: "github_repo",
+    repoBranch: branch,
+    pageCount: 1,
+    chunkCount: 0,
+    createdAt: serverTime()
+  });
+  await bumpCounter(userId, "sources");
+
+  // Fetch file contents in parallel (bounded) — same pattern as ingestRepo.
+  const files = await mapWithConcurrency(blobs, GITHUB_FETCH_CONCURRENCY, async (blob) => {
+    const content = await fetchRawFile(owner, repo, branch, blob.path, opts.token);
+    return { path: blob.path, content };
+  });
+
+  // Dedup against prior /learn of the same repo URL and within this ingest.
+  const known = await existingHashesForSource(userId, url);
+  const seenNow = new Set<string>();
+  const pending: { path: string; text: string; hash: string }[] = [];
+  let skipped = 0;
+  for (const f of files) {
+    if (!f.content || !f.content.trim()) continue;
+    for (const text of chunkText(`FILE: ${f.path}\n${f.content}`)) {
+      const hash = contentHash(text);
+      if (known.has(hash) || seenNow.has(hash)) { skipped += 1; continue; }
+      seenNow.add(hash);
+      pending.push({ path: f.path, text, hash });
+    }
+  }
+
+  let saved = 0;
+  for (let i = 0; i < pending.length; i += EMBED_BATCH) {
+    const part = pending.slice(i, i + EMBED_BATCH);
+    const embeddings = await embeddingBatch(part.map((p) => p.text), userId);
+    for (let j = 0; j < part.length; j += WRITE_BATCH) {
+      const slice = part.slice(j, j + WRITE_BATCH);
+      const batch = db.batch();
+      slice.forEach((c, idx) => {
+        const ref = db.collection("knowledge_chunks").doc();
+        batch.set(ref, {
+          userId,
+          scope: "topic",
+          topicId,
+          sourceId: sourceRef.id,
+          sourceUrl: url,
+          sourcePath: c.path,
+          title: c.path,
+          content: c.text,
+          embedding: embeddings[j + idx],
+          chunkType: "code",
+          confidence: 0.8,
+          contentHash: c.hash,
+          tags,
+          createdAt: serverTime()
+        });
+      });
+      await batch.commit();
+      saved += slice.length;
+    }
+  }
+  await sourceRef.update({ chunkCount: saved });
+  await bumpCounter(userId, "knowledge_chunks", saved);
+
+  // Best-effort structured summary over the repo's source (map-reduce when long).
+  let summarized = false;
+  try {
+    const combined = files
+      .filter((f) => f.content && f.content.trim())
+      .map((f) => `FILE: ${f.path}\n${f.content}`)
+      .join("\n\n");
+    const summary = await summarizeResource({
+      userId,
+      topicId,
+      sourceId: sourceRef.id,
+      sourceUrl: url,
+      title: repoLabel,
+      text: combined
+    });
+    summarized = summary.saved;
+  } catch {
+    /* summarization is best-effort; ingest already succeeded */
+  }
+
+  return { sourceId: sourceRef.id, title: repoLabel, url, pages: 1, chunks: saved, skipped, summarized };
 }
 
 // Best-effort: appends an outcome to memory. Never throws into the request path
@@ -214,6 +356,66 @@ export async function recordOutcome(opts: {
 // `chunkType: "summary"` knowledge chunk. Best-effort like `recordOutcome` — it
 // NEVER throws into the /learn request path; a summarization failure must not
 // fail an otherwise successful ingest.
+// System prompt shared by single-shot and the map-reduce SYNTHESIS step.
+const SUMMARY_SYSTEM =
+  "Ты выделяешь суть изученного ресурса для долговременной памяти инженерного агента. " +
+  "Пиши кратко, структурированно и по делу, без воды и без выдумок поверх текста.";
+
+// Produce the final structured Russian summary from `text` (a raw resource for
+// the single-shot path, or the concatenated per-chunk notes for the reduce step).
+async function structuredSummary(
+  userId: string,
+  title: string,
+  sourceUrl: string,
+  text: string
+): Promise<string> {
+  const user =
+    `Сделай структурированный конспект ресурса ниже.\n\n` +
+    `Заголовок: ${title}\nURL: ${sourceUrl}\n\n` +
+    `ФОРМАТ:\n` +
+    `- Тема: 1-2 предложения о чём ресурс.\n` +
+    `- Ключевые понятия: 5-10 пунктов.\n` +
+    `- Применимые паттерны/практики: список того, что можно переиспользовать.\n` +
+    `- Краткий вывод: 2-3 предложения.\n\n` +
+    `ТЕКСТ:\n${text}`;
+  return (await llm(SUMMARY_SYSTEM, user, 0.2, userId)).trim();
+}
+
+// Map-reduce summary for long resources (improvement 3): split the full text
+// into a bounded number of chunks, summarize each (MAP), then synthesize one
+// structured summary from the per-chunk notes (REDUCE). A single failed map
+// pass is skipped rather than aborting the whole summary. Returns "" when no
+// chunk could be summarized so the caller can fall back to single-shot.
+async function mapReduceSummary(
+  userId: string,
+  title: string,
+  sourceUrl: string,
+  text: string
+): Promise<string> {
+  const bounded = text.slice(0, SUMMARY_MAX_CHUNKS * SUMMARY_CHUNK_CHARS);
+  const chunks = chunkText(bounded, SUMMARY_CHUNK_CHARS).slice(0, SUMMARY_MAX_CHUNKS);
+  if (!chunks.length) return "";
+
+  const mapSystem =
+    "Ты кратко конспектируешь ОДИН фрагмент большого ресурса. " +
+    "Выдели только факты и идеи этого фрагмента в виде сжатых пунктов, без воды и без выдумок.";
+  const partials: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const mapUser =
+      `Фрагмент ${i + 1} из ${chunks.length} ресурса «${title}».\n\n` +
+      `Выдели ключевые факты и идеи этого фрагмента в виде кратких пунктов.\n\n` +
+      `ТЕКСТ:\n${chunks[i]}`;
+    try {
+      const partial = (await llm(mapSystem, mapUser, 0.2, userId)).trim();
+      if (partial) partials.push(`Фрагмент ${i + 1}:\n${partial}`);
+    } catch {
+      /* skip a failed map pass; keep summarizing the rest */
+    }
+  }
+  if (!partials.length) return "";
+  return structuredSummary(userId, title, sourceUrl, partials.join("\n\n"));
+}
+
 export async function summarizeResource(opts: {
   userId: string;
   topicId: string;
@@ -223,23 +425,21 @@ export async function summarizeResource(opts: {
   text: string;
 }): Promise<{ saved: boolean }> {
   try {
-    const input = (opts.text || "").trim().slice(0, SUMMARY_INPUT_MAX);
-    if (input.length < OUTCOME_MIN_CHARS) return { saved: false };
+    const raw = (opts.text || "").trim();
+    if (raw.length < OUTCOME_MIN_CHARS) return { saved: false };
 
-    const system =
-      "Ты выделяешь суть изученного ресурса для долговременной памяти инженерного агента. " +
-      "Пиши кратко, структурированно и по делу, без воды и без выдумок поверх текста.";
-    const user =
-      `Сделай структурированный конспект ресурса ниже.\n\n` +
-      `Заголовок: ${opts.title}\nURL: ${opts.sourceUrl}\n\n` +
-      `ФОРМАТ:\n` +
-      `- Тема: 1-2 предложения о чём ресурс.\n` +
-      `- Ключевые понятия: 5-10 пунктов.\n` +
-      `- Применимые паттерны/практики: список того, что можно переиспользовать.\n` +
-      `- Краткий вывод: 2-3 предложения.\n\n` +
-      `ТЕКСТ:\n${input}`;
-
-    const summary = (await llm(system, user, 0.2, opts.userId)).trim();
+    // Long resources: map-reduce over the full text instead of truncating to
+    // the first SUMMARY_INPUT_MAX chars. Fall back to single-shot on the
+    // truncated head if map-reduce yields nothing.
+    let summary: string;
+    if (raw.length > SUMMARY_INPUT_MAX) {
+      summary = await mapReduceSummary(opts.userId, opts.title, opts.sourceUrl, raw);
+      if (summary.length < OUTCOME_MIN_CHARS) {
+        summary = await structuredSummary(opts.userId, opts.title, opts.sourceUrl, raw.slice(0, SUMMARY_INPUT_MAX));
+      }
+    } else {
+      summary = await structuredSummary(opts.userId, opts.title, opts.sourceUrl, raw);
+    }
     if (summary.length < OUTCOME_MIN_CHARS) return { saved: false };
 
     const hash = contentHash(summary);
