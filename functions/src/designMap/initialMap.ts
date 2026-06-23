@@ -1,5 +1,13 @@
 import type { DesignMapEdge, DesignMapEdgeType, DesignMapNode } from "./types";
 
+// Resolved skill the seeder can render as a real node. The caller (store) is
+// responsible for ownership-checking these before passing them in.
+export interface InitialMapSkill {
+  id: string;
+  skillName?: string;
+  description?: string;
+}
+
 // Shape of the minimal project info we can use to seed an initial map. All
 // fields besides `id` are optional — the builder degrades gracefully.
 export interface InitialMapProject {
@@ -9,7 +17,12 @@ export interface InitialMapProject {
   stack?: string;
   summary?: string;
   repoUrl?: string;
+  // Raw skill ids (back-compat). Used only when `skills` is not supplied; the
+  // resulting node falls back to a generic `Skill <id>` label and no description.
   skillIds?: string[];
+  // Enriched, ownership-checked skills. Preferred over `skillIds` so seeded
+  // nodes carry the real skill name and description.
+  skills?: InitialMapSkill[];
 }
 
 // Grid geometry: deterministic layout so two builds of the same project yield
@@ -92,19 +105,23 @@ export function buildInitialDesignMap(project: InitialMapProject): {
     addFeature("repo", "module", "Repository", project.repoUrl);
   }
 
-  // Skill nodes from project.skillIds (column 3), laid out in a grid so a long
-  // list wraps into multiple columns instead of one very tall stack.
-  const skillIds = project.skillIds ?? [];
+  // Skill nodes (column 3), laid out in a grid so a long list wraps into
+  // multiple columns instead of one very tall stack. Prefer the enriched
+  // `skills` (real name + description); fall back to raw `skillIds`.
+  const skills: InitialMapSkill[] =
+    project.skills ?? (project.skillIds ?? []).map((rawId) => ({ id: String(rawId) }));
   const skillBaseCol = COL_W * 3;
   const SKILLS_PER_COL = 8;
-  skillIds.forEach((rawId, index) => {
-    const skillId = String(rawId);
+  skills.forEach((skill, index) => {
+    const skillId = String(skill.id);
     const col = Math.floor(index / SKILLS_PER_COL);
     const row = index % SKILLS_PER_COL;
+    const label = skill.skillName ? truncate(skill.skillName, 200) : truncate(`Skill ${skillId}`, 200);
     const node: DesignMapNode = {
       id: `skill-${skillId}`,
       type: "skill",
-      label: truncate(`Skill ${skillId}`, 200),
+      label,
+      description: skill.description ? truncate(skill.description, 5000) : undefined,
       position: { x: skillBaseCol + col * COL_W, y: row * ROW_H },
       skillId,
       confidence: "manual"

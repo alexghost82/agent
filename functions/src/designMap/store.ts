@@ -1,7 +1,7 @@
 import { db } from "../firebase";
 import { serverTime, logEvent } from "../util";
 import type { DesignMap, DesignMapEdge, DesignMapNode } from "./types";
-import { buildInitialDesignMap, type InitialMapProject } from "./initialMap";
+import { buildInitialDesignMap, type InitialMapProject, type InitialMapSkill } from "./initialMap";
 
 const COLLECTION = "design_maps";
 
@@ -122,6 +122,28 @@ export async function patchDesignMap(
   });
 }
 
+// Resolves raw skill ids into enriched skill data, enforcing ownership at the
+// data layer (mirrors `ownedSkill` in routes/designMap.ts): a skill owned by a
+// different user — or one that doesn't exist — is skipped. Order is preserved so
+// the seeded grid layout stays deterministic.
+async function resolveOwnedSkills(userId: string, skillIds: string[]): Promise<InitialMapSkill[]> {
+  const ids = skillIds.map((id) => String(id)).filter(Boolean);
+  const snaps = await Promise.all(
+    ids.map((id) => db.collection("agent_skills").doc(id).get())
+  );
+  const resolved: InitialMapSkill[] = [];
+  snaps.forEach((snap, index) => {
+    const data = snap.exists ? snap.data() : undefined;
+    if (!data || data.userId !== userId) return;
+    resolved.push({
+      id: ids[index],
+      skillName: typeof data.skillName === "string" ? data.skillName : undefined,
+      description: typeof data.description === "string" ? data.description : undefined
+    });
+  });
+  return resolved;
+}
+
 // Returns the existing owned map, or builds + persists an initial one.
 export async function ensureInitialDesignMap(
   userId: string,
@@ -130,6 +152,7 @@ export async function ensureInitialDesignMap(
   const existing = await getDesignMap(userId, project.id);
   if (existing) return existing;
 
-  const { nodes, edges } = buildInitialDesignMap(project);
+  const skills = await resolveOwnedSkills(userId, project.skillIds ?? []);
+  const { nodes, edges } = buildInitialDesignMap({ ...project, skills });
   return saveDesignMap(userId, project.id, { nodes, edges });
 }
