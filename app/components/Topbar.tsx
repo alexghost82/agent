@@ -7,9 +7,11 @@ import type { GhostData } from "../useGhostData";
 import type { Json } from "../api";
 
 export function Topbar({ g }: { g: GhostData }) {
-  const { t, lang, setLang, theme, setTheme, active, query, setQuery, setActive } = g;
+  const { t, lang, setLang, theme, setTheme, active, query, setQuery, setActive, auth } = g;
   const meta = STEP_META[active];
   const stepN = meta.n === "\u2022" ? "\u2014" : meta.n;
+  const isOverview = active === "overview";
+  const title = isOverview && auth?.username ? `${t.welcomeBack}, ${auth.username} \u{1F44B}` : t.steps[active].title;
 
   const recent = Array.isArray(g.stats?.recentLogs) ? (g.stats!.recentLogs as Json[]) : [];
   const [bellOpen, setBellOpen] = useState(false);
@@ -20,7 +22,7 @@ export function Topbar({ g }: { g: GhostData }) {
         <p className="crumb">
           {t.step} {stepN}
         </p>
-        <h1>{t.steps[active].title}</h1>
+        <h1>{title}</h1>
         <p className="page-hint">{t.steps[active].hint}</p>
       </div>
 

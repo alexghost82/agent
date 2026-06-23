@@ -20,6 +20,7 @@ export const STEP_META: Record<StepKey, { n: string; icon: string }> = {
 export const DICT: Record<Lang, any> = {
   en: {
     brandSub: "Self-learning AI dev agent",
+    welcomeBack: "Welcome back",
     workflow: "Workflow (in order)",
     refresh: "Refresh",
     searchPlaceholder: "Search\u2026",
@@ -359,6 +360,7 @@ export const DICT: Record<Lang, any> = {
   },
   he: {
     brandSub: "\u05e1\u05d5\u05db\u05df \u05e4\u05d9\u05ea\u05d5\u05d7 \u05dc\u05d5\u05de\u05d3 \u05de\u05d1\u05d5\u05e1\u05e1 AI",
+    welcomeBack: "\u05d1\u05e8\u05d5\u05da \u05e9\u05d5\u05d1\u05da",
     searchPlaceholder: "\u05d7\u05d9\u05e4\u05d5\u05e9\u2026",
     searchEmpty: "\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d5 \u05ea\u05d5\u05e6\u05d0\u05d5\u05ea.",
     notifications: "\u05d4\u05ea\u05e8\u05d0\u05d5\u05ea",
@@ -698,6 +700,7 @@ export const DICT: Record<Lang, any> = {
   },
   ru: {
     brandSub: "Самообучающийся AI-агент-разработчик",
+    welcomeBack: "С возвращением",
     searchPlaceholder: "Поиск\u2026",
     searchEmpty: "Ничего не найдено.",
     notifications: "Уведомления",
