@@ -85,6 +85,29 @@ export async function readLatestScan(
   return docs[0] as FirebaseFirestore.DocumentData & { id: string };
 }
 
+// Latest COMPLETED scan for a project (newest by createdAt). Unlike
+// readLatestScan this ignores pending / running / failed scans, so callers that
+// need a finished graph (e.g. seeding the design map) never read a half-written
+// or empty snapshot. Same query shape as readLatestScan; filtered + sorted
+// in-memory so no composite index is required.
+export async function readLatestCompletedScan(
+  userId: string,
+  projectId: string
+): Promise<(FirebaseFirestore.DocumentData & { id: string }) | null> {
+  const snap = await db
+    .collection("project_scans")
+    .where("userId", "==", userId)
+    .where("projectId", "==", projectId)
+    .limit(50)
+    .get();
+  if (snap.empty) return null;
+  const docs = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((d) => (d as any).status === "completed")
+    .sort((a, b) => tsMillis((b as any).createdAt) - tsMillis((a as any).createdAt));
+  return (docs[0] as FirebaseFirestore.DocumentData & { id: string }) ?? null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Deletion helpers                                                           */
 /* -------------------------------------------------------------------------- */
@@ -478,4 +501,142 @@ export async function readNodeDetail(
   const data = doc.data() || {};
   if (data.userId !== userId || data.projectId !== projectId) return null;
   return { id: doc.id, ...data };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Scan graph read for design-map seeding                                     */
+/* -------------------------------------------------------------------------- */
+
+// A trimmed, transport-light view of a scan's graph, sufficient to translate
+// into a design map: node type/label/description + edge type/endpoints. (No
+// positions — the design map computes its own deterministic layout.) Types are
+// intentionally widened to plain strings so consumers in other packages can map
+// them without importing the project-intelligence enums.
+export interface ScanGraphNodeView {
+  id: string;
+  type: string;
+  label: string;
+  description?: string;
+  confidence?: string;
+}
+
+export interface ScanGraphEdgeView {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface ScanGraphView {
+  scanId: string;
+  nodes: ScanGraphNodeView[];
+  edges: ScanGraphEdgeView[];
+}
+
+// Upper bound on the number of nodes hydrated for a design-map seed. Bounds both
+// the per-node description reads (getAll) and the size of the seeded map so it
+// stays within the editor's 500-item save cap (see designMap/validators.ts).
+const DESIGN_SEED_NODE_CAP = 400;
+
+// Rank intel node types so that, when a graph exceeds the cap, the most
+// architecturally meaningful nodes survive and bulk file/test nodes are dropped
+// first. Lower = kept first. The project root is always rank 0.
+const SEED_TYPE_PRIORITY: Record<string, number> = {
+  project: 0,
+  feature: 1,
+  apiRoute: 2,
+  firebaseFunction: 3,
+  service: 4,
+  worker: 5,
+  dbModel: 6,
+  firestoreCollection: 7,
+  module: 8,
+  component: 9,
+  externalPackage: 10,
+  config: 11,
+  documentation: 12,
+  test: 13,
+  file: 14
+};
+
+function seedPriority(type: string): number {
+  return SEED_TYPE_PRIORITY[type] ?? 99;
+}
+
+// Read the latest COMPLETED scan's graph for a project, hydrated with per-node
+// descriptions, for the design-map seeder. Returns null when there is no
+// completed scan or no persisted graph snapshot (graceful fallback for the
+// caller). Ownership is enforced at the data layer (snapshot + node docs are
+// tenant-checked) and only structural fields are read — never file contents or
+// secrets.
+export async function readLatestCompletedScanGraph(
+  userId: string,
+  projectId: string
+): Promise<ScanGraphView | null> {
+  const scan = await readLatestCompletedScan(userId, projectId);
+  if (!scan) return null;
+
+  const mapDoc = await db.collection("project_maps").doc(scan.id).get();
+  if (!mapDoc.exists) return null;
+  const data = mapDoc.data() || {};
+  if (data.userId !== userId) return null;
+
+  const lightNodes = (data.nodes as any[]) || [];
+  const rawEdges = (data.edges as any[]) || [];
+  if (lightNodes.length === 0) return null;
+
+  // Keep the most meaningful nodes when the graph is large: stable sort by type
+  // priority then id, then cap. Bounds the description reads below.
+  const kept = [...lightNodes]
+    .sort((a, b) => {
+      const pa = seedPriority(String(a?.type));
+      const pb = seedPriority(String(b?.type));
+      if (pa !== pb) return pa - pb;
+      return String(a?.id).localeCompare(String(b?.id));
+    })
+    .slice(0, DESIGN_SEED_NODE_CAP);
+
+  // Hydrate descriptions from the per-node detail docs in a single batched read.
+  const descById = new Map<string, string>();
+  const refs = kept.map((n) =>
+    db.collection("project_nodes").doc(`${scan.id}__${String(n.id)}`)
+  );
+  if (refs.length) {
+    const docs = await db.getAll(...refs);
+    for (const doc of docs) {
+      if (!doc.exists) continue;
+      const d = doc.data() || {};
+      if (d.userId !== userId) continue;
+      const purpose =
+        (d.details && typeof d.details.purpose === "string" && d.details.purpose) || "";
+      const description =
+        (typeof d.description === "string" && d.description) || purpose || "";
+      if (description) descById.set(String(d.nodeId), description);
+    }
+  }
+
+  const keptIds = new Set(kept.map((n) => String(n.id)));
+  const nodes: ScanGraphNodeView[] = kept.map((n) => {
+    const id = String(n.id);
+    const description = descById.get(id);
+    return {
+      id,
+      type: String(n.type),
+      label: String(n.label ?? id),
+      ...(description ? { description } : {}),
+      ...(n.confidence ? { confidence: String(n.confidence) } : {})
+    };
+  });
+
+  // Only keep edges whose BOTH endpoints survived the cap (no dangling edges).
+  const edges: ScanGraphEdgeView[] = rawEdges
+    .filter((e) => keptIds.has(String(e?.source)) && keptIds.has(String(e?.target)))
+    .map((e) => ({
+      id: String(e.id ?? `${e.source}->${e.target}`),
+      source: String(e.source),
+      target: String(e.target),
+      type: String(e.type ?? "related_to")
+    }));
+
+  return { scanId: scan.id, nodes, edges };
 }

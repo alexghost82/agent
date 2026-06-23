@@ -14,12 +14,14 @@
  * deterministic, no network or AI key required.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { FieldValue } from "firebase-admin/firestore";
 import {
   EMULATOR_AVAILABLE,
   startServer,
   seedUser,
   addDoc,
   expectError,
+  db,
   type TestServer
 } from "../helpers/harness";
 
@@ -129,6 +131,103 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: design-map router", () => {
     // ...while the foreign and non-existent ids are skipped entirely.
     expect(ids).not.toContain(`skill-${foreignSkill}`);
     expect(ids).not.toContain("skill-does-not-exist");
+  });
+
+  it("GET derives the map from the latest completed scan graph", async () => {
+    const user = await seedUser();
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "Scanned",
+      description: "Has a scan",
+      skillIds: []
+    });
+
+    // A completed scan plus its persisted graph snapshot (project_maps) and a
+    // per-node detail doc (project_nodes) — exactly what persistScanGraph writes.
+    const scanRef = await db.collection("project_scans").add({
+      userId: user.userId,
+      projectId,
+      status: "completed",
+      createdAt: FieldValue.serverTimestamp()
+    });
+    const scanId = scanRef.id;
+    await db.collection("project_maps").doc(scanId).set({
+      userId: user.userId,
+      projectId,
+      scanId,
+      nodes: [
+        { id: "project-root", type: "project", label: "Scanned" },
+        { id: "feat-auth", type: "feature", label: "Auth", confidence: "high" },
+        { id: "route-login", type: "apiRoute", label: "login.ts" }
+      ],
+      edges: [
+        { id: "e1", source: "project-root", target: "feat-auth", type: "owns" },
+        { id: "e2", source: "feat-auth", target: "route-login", type: "depends_on" }
+      ],
+      createdAt: FieldValue.serverTimestamp()
+    });
+    await db.collection("project_nodes").doc(`${scanId}__feat-auth`).set({
+      userId: user.userId,
+      projectId,
+      scanId,
+      nodeId: "feat-auth",
+      description: "Authentication feature",
+      details: { purpose: "Authentication feature" }
+    });
+
+    const res = await srv.request("GET", `/projects/${projectId}/design-map`, { token: user.token });
+    expect(res.status).toBe(200);
+    const map = res.body.map;
+    const byId = new Map<string, any>(map.nodes.map((n: any) => [n.id, n]));
+
+    // Root carries the project id; intel project node folded into it (no dup).
+    expect(byId.get("project").data.projectId).toBe(projectId);
+    expect(byId.has("intel-project-root")).toBe(false);
+
+    // Intel nodes translated by type, with description hydrated from project_nodes.
+    expect(byId.get("intel-feat-auth").type).toBe("feature");
+    expect(byId.get("intel-feat-auth").description).toBe("Authentication feature");
+    expect(byId.get("intel-route-login").type).toBe("api_route");
+
+    // owns -> contains edge reattaches to the design root.
+    expect(
+      map.edges.some(
+        (e: any) => e.source === "project" && e.target === "intel-feat-auth" && e.type === "contains"
+      )
+    ).toBe(true);
+    expect(
+      map.edges.some(
+        (e: any) =>
+          e.source === "intel-feat-auth" && e.target === "intel-route-login" && e.type === "depends_on"
+      )
+    ).toBe(true);
+
+    // When a graph drives the seed, the thin project-field features are NOT used.
+    expect(byId.has("feature-desc")).toBe(false);
+  });
+
+  it("falls back to the thin seed when there is no completed scan", async () => {
+    const user = await seedUser();
+    const projectId = await addDoc("projects", {
+      userId: user.userId,
+      name: "No scan",
+      description: "Only fields"
+    });
+
+    // A scan exists but is NOT completed -> the seeder must ignore it and fall
+    // back to the project-field seed.
+    await db.collection("project_scans").add({
+      userId: user.userId,
+      projectId,
+      status: "scanning",
+      createdAt: FieldValue.serverTimestamp()
+    });
+
+    const res = await srv.request("GET", `/projects/${projectId}/design-map`, { token: user.token });
+    expect(res.status).toBe(200);
+    const ids: string[] = res.body.map.nodes.map((n: any) => n.id);
+    expect(ids).toContain("feature-desc");
+    expect(ids.some((id) => id.startsWith("intel-"))).toBe(false);
   });
 
   it("never leaks another user's project (404 on GET)", async () => {
