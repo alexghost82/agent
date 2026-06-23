@@ -13,6 +13,7 @@ export function SourcesPanel({ g }: { g: GhostData }) {
   const [newTopicDesc, setNewTopicDesc] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [sourceTags, setSourceTags] = useState("");
+  const [deepIngest, setDeepIngest] = useState(false);
 
   const { page, setPage, pageCount, visible } = usePaged(sources, 8);
 
@@ -33,9 +34,9 @@ export function SourcesPanel({ g }: { g: GhostData }) {
     if (!selectedTopic || !parsedUrls.length) return;
     const tags = sourceTags.split(",").map((x) => x.trim()).filter(Boolean);
     if (parsedUrls.length === 1) {
-      await g.addSource(selectedTopic, parsedUrls[0], tags);
+      await g.addSource(selectedTopic, parsedUrls[0], tags, deepIngest);
     } else {
-      await g.addSources(selectedTopic, parsedUrls, tags);
+      await g.addSources(selectedTopic, parsedUrls, tags, deepIngest);
     }
     setSourceUrl("");
     setSourceTags("");
@@ -80,13 +81,23 @@ export function SourcesPanel({ g }: { g: GhostData }) {
               className="url-multi"
               value={sourceUrl}
               onChange={(e) => setSourceUrl(e.target.value)}
-              placeholder={"https://github.com/owner/repo\nhttps://docs.example.com/guide"}
+              placeholder={"https://docs.example.com/guide\nhttps://example.com/blog/article"}
               rows={3}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addSource();
               }}
             />
             <p className="muted url-hint">{t.urlMultiHint}</p>
+            <p className="muted url-hint">{t.githubSourceHint}</p>
+            <label className="deep-toggle">
+              <input
+                type="checkbox"
+                checked={deepIngest}
+                onChange={(e) => setDeepIngest(e.target.checked)}
+              />
+              <span>{t.deepIngestLabel}</span>
+            </label>
+            <p className="muted url-hint">{t.deepIngestHint}</p>
             <label>{t.tagsLabel}</label>
             <input value={sourceTags} onChange={(e) => setSourceTags(e.target.value)} placeholder="docs, api" />
             <button className="primary" onClick={addSource} disabled={loading.sources || !parsedUrls.length}>
@@ -116,6 +127,10 @@ export function SourcesPanel({ g }: { g: GhostData }) {
                   const id = String(s.id);
                   const reKey = `reingest-${id}`;
                   const delKey = `del-source-${id}`;
+                  const pages = Number(s.pages ?? s.pageCount ?? 0);
+                  const isDeep = !!s.deep;
+                  const isSummarized = !!s.summarized;
+                  const showLimited = pages > 1 || isDeep;
                   return (
                     <li key={id}>
                       <span className="src-ic">
@@ -127,8 +142,22 @@ export function SourcesPanel({ g }: { g: GhostData }) {
                         </a>
                         <span className="src-url">{String(s.url)}</span>
                       </div>
-                      <span className="src-chunks">
-                        {Number(s.chunkCount ?? s.chunks ?? 0)} {t.chunksUnit}
+                      <span className="src-meta">
+                        <span className="src-chunks">
+                          {Number(s.chunkCount ?? s.chunks ?? 0)} {t.chunksUnit}
+                        </span>
+                        {pages > 0 ? (
+                          <span className="src-pages">
+                            {pages} {t.pagesUnit}
+                          </span>
+                        ) : null}
+                        {isDeep ? <span className="src-badge deep">{t.deepBadge}</span> : null}
+                        {isSummarized ? (
+                          <span className="src-badge">{t.summarizedBadge}</span>
+                        ) : null}
+                        {showLimited ? (
+                          <span className="src-limited">{t.limitedHint}</span>
+                        ) : null}
                       </span>
                       <div className="row-actions">
                         <button
