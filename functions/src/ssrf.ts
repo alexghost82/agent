@@ -8,6 +8,29 @@ import { log } from "./log";
 
 const USER_AGENT = "GHOST-Agent-Builder/1.0 (read-only)";
 const FETCH_TIMEOUT_MS = 15000;
+// Default cap on extracted page/PDF text. Overridable via READ_URL_MAX_CHARS so
+// deployments can trade memory for completeness without a code change.
+const DEFAULT_READ_URL_MAX_CHARS = 160000;
+
+// Resolve the configured text cap, ignoring blank/invalid/non-positive values.
+function readUrlMaxChars(): number {
+  const raw = (process.env.READ_URL_MAX_CHARS || "").trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  }
+  return DEFAULT_READ_URL_MAX_CHARS;
+}
+
+// Heuristics for treating a response as a PDF even when the content-type is
+// wrong/missing: an explicit `.pdf` URL path or the `%PDF-` file magic.
+function urlPathLooksPdf(url: URL): boolean {
+  return url.pathname.toLowerCase().endsWith(".pdf");
+}
+
+function bufferLooksPdf(buf: Buffer): boolean {
+  return buf.length >= 5 && buf.subarray(0, 5).toString("latin1") === "%PDF-";
+}
 // Maximum number of redirects we will follow. Each hop is fully SSRF-validated
 // before it is fetched, so this only bounds work, but a small cap also defends
 // against redirect loops.
@@ -283,7 +306,8 @@ async function fetchTextSecure(rawUrl: string, maxChars: number): Promise<{ ok: 
 }
 
 export async function readUrl(rawUrl: string): Promise<{ title: string; text: string }> {
-  await assertPublicHttpUrl(rawUrl);
+  const validated = await assertPublicHttpUrl(rawUrl);
+  const maxChars = readUrlMaxChars();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -295,10 +319,16 @@ export async function readUrl(rawUrl: string): Promise<{ title: string; text: st
       // HTML can still be decoded as UTF-8.
       const buf = Buffer.from(await response.arrayBuffer());
 
-      // Real PDF parsing behind a seam (Epic 1.4). Many doc hosts serve an HTML
-      // viewer instead, so only the real application/pdf content-type takes this path.
-      if (contentType.includes("application/pdf")) {
-        const text = (await extractPdfText(buf)).slice(0, 160000);
+      // Real PDF parsing behind a seam (Epic 1.4). Treat the response as a PDF
+      // when the content-type says so, when the URL path ends in `.pdf`, or when
+      // the body starts with the `%PDF-` magic bytes — many hosts mislabel the
+      // content-type (e.g. application/octet-stream) for downloadable PDFs.
+      if (
+        contentType.includes("application/pdf") ||
+        urlPathLooksPdf(validated) ||
+        bufferLooksPdf(buf)
+      ) {
+        const text = (await extractPdfText(buf)).slice(0, maxChars);
         return { title: rawUrl, text };
       }
 
@@ -306,7 +336,7 @@ export async function readUrl(rawUrl: string): Promise<{ title: string; text: st
       const $ = cheerio.load(html);
       $("script, style, nav, footer, header, noscript, svg").remove();
       const title = $("title").text().trim() || rawUrl;
-      let text = $("body").text().replace(/\s+/g, " ").trim().slice(0, 160000);
+      let text = $("body").text().replace(/\s+/g, " ").trim().slice(0, maxChars);
 
       // JS-render fallback (Epic 1.3): a near-empty body usually means the content
       // is hydrated client-side. Re-fetch through the headless renderer, but only
@@ -315,7 +345,7 @@ export async function readUrl(rawUrl: string): Promise<{ title: string; text: st
       if (text.length < JS_RENDER_MIN_TEXT && jsRenderEnabled()) {
         await assertPublicHttpUrl(rawUrl);
         try {
-          const rendered = (await renderWithJs(rawUrl)).replace(/\s+/g, " ").trim().slice(0, 160000);
+          const rendered = (await renderWithJs(rawUrl)).replace(/\s+/g, " ").trim().slice(0, maxChars);
           if (rendered.length > text.length) text = rendered;
         } catch (err) {
           log("warn", "js_render_failed", {
