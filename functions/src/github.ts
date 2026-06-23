@@ -3,6 +3,7 @@ import { embeddingBatch, llm } from "./ai";
 import { serverTime } from "./util";
 import { chunkText, isTextFile, parseRepoUrl } from "./pure";
 import { mapWithConcurrency } from "./concurrency";
+import { toVector } from "./vector";
 import { log } from "./log";
 import { MAX_FILE_BYTES, getRepoInfo, fetchTree, fetchRawFile } from "./githubFetch";
 import { classifyFile } from "./project-intelligence/scanner/classify";
@@ -225,7 +226,7 @@ export async function ingestRepo(opts: {
           sourcePath: p.path,
           title: p.path,
           content: p.text,
-          embedding: embeddings[j + idx],
+          embedding: toVector(embeddings[j + idx]),
           chunkType: "code",
           confidence: 0.8,
           createdAt: serverTime()

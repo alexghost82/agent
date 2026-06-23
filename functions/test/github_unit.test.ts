@@ -58,6 +58,7 @@ vi.mock("../src/githubFetch", () => ({
 vi.mock("../src/ai", () => ({ embeddingBatch: aiMock.embeddingBatch, llm: aiMock.llm }));
 
 import { ingestRepo } from "../src/github";
+import { readEmbedding } from "../src/vector";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -109,9 +110,10 @@ describe("ingestRepo", () => {
       userId: "u1",
       projectId: "p1",
       scope: "project",
-      chunkType: "code",
-      embedding: [0.1, 0.2]
+      chunkType: "code"
     });
+    // Embeddings are stored as native Firestore vector values now.
+    expect(readEmbedding(store.state.setDocs[0].data.embedding)).toEqual([0.1, 0.2]);
 
     // Final progress report fired.
     expect(onProgress).toHaveBeenCalled();

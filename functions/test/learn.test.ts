@@ -26,6 +26,7 @@ vi.mock("../src/ai", () => ({ llm: ai.llm, embedding: ai.embedding }));
 vi.mock("../src/stats", () => ({ bumpCounter: vi.fn(async () => {}), COUNTED_COLLECTIONS: [] }));
 
 import { summarizeResource } from "../src/learn";
+import { readEmbedding } from "../src/vector";
 
 const baseOpts = {
   userId: "u1",
@@ -62,7 +63,9 @@ describe("summarizeResource (Epic 1.1)", () => {
     expect(doc.topicId).toBe("t1");
     expect(doc.sourceId).toBe("s1");
     expect(doc.sourceUrl).toBe("https://example.com/article");
-    expect(doc.embedding).toEqual([0.1, 0.2, 0.3]);
+    // Embeddings are now stored as native Firestore vector values, not plain
+    // arrays; read it back via the vector helper to assert the underlying floats.
+    expect(readEmbedding(doc.embedding)).toEqual([0.1, 0.2, 0.3]);
     expect(typeof doc.contentHash).toBe("string");
     expect(String(doc.content)).toContain("Тема");
   });

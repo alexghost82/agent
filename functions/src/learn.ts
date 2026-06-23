@@ -6,6 +6,7 @@ import { chunkText, contentHash, classifyResourceUrl, isTextFile, parseRepoUrl }
 import { readUrl, crawlSite, type CrawledPage } from "./ssrf";
 import { MAX_FILE_BYTES, getRepoInfo, fetchTree, fetchRawFile } from "./githubFetch";
 import { mapWithConcurrency } from "./concurrency";
+import { toVector } from "./vector";
 import { log } from "./log";
 
 const EMBED_BATCH = Number(process.env.EMBED_BATCH_SIZE) || 96;
@@ -141,7 +142,7 @@ export async function ingestUrl(opts: {
             sourceUrl: page.url,
             title: page.title,
             content: c.text,
-            embedding: embeddings[j + idx],
+            embedding: toVector(embeddings[j + idx]),
             chunkType: "fact",
             confidence: 0.75,
             contentHash: c.hash,
@@ -263,7 +264,7 @@ export async function ingestGithubRepoIntoTopic(opts: {
           sourcePath: c.path,
           title: c.path,
           content: c.text,
-          embedding: embeddings[j + idx],
+          embedding: toVector(embeddings[j + idx]),
           chunkType: "code",
           confidence: 0.8,
           contentHash: c.hash,
@@ -333,7 +334,7 @@ export async function recordOutcome(opts: {
       topicId: opts.topicId || null,
       title: opts.title.slice(0, 200),
       content: content.slice(0, OUTCOME_MAX_CHARS),
-      embedding: emb,
+      embedding: toVector(emb),
       chunkType: opts.kind,
       confidence: 0.6,
       contentHash: hash,
@@ -461,7 +462,7 @@ export async function summarizeResource(opts: {
       sourceUrl: opts.sourceUrl,
       title: opts.title.slice(0, 200),
       content: summary.slice(0, OUTCOME_MAX_CHARS),
-      embedding: emb,
+      embedding: toVector(emb),
       chunkType: "summary",
       confidence: 0.9,
       contentHash: hash,

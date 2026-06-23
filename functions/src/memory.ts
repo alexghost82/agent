@@ -1,6 +1,7 @@
 import { db } from "./firebase";
 import { embedding } from "./ai";
 import { cosineSimilarity, selectVectorBackend } from "./pure";
+import { readEmbedding } from "./vector";
 import { log } from "./log";
 import { startSpan, recordLatency, recordCounter, recordError } from "./telemetry";
 
@@ -62,7 +63,7 @@ export class InMemoryCosineIndex implements VectorIndex {
     recordCounter("vector_search_candidates_total", { backend: "in-memory" }, snap.size);
     const scored = snap.docs.map((doc) => {
       const data = doc.data();
-      const emb = data.embedding as number[] | undefined;
+      const emb = readEmbedding(data.embedding);
       return {
         id: doc.id,
         sourceUrl: data.sourceUrl,
