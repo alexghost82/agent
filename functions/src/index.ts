@@ -33,6 +33,7 @@ import { plansRouter } from "./routes/plans";
 import { dashboardRouter } from "./routes/dashboard";
 import { keysRouter } from "./routes/keys";
 import { agentRouter } from "./routes/agent";
+import { maintenanceRouter } from "./routes/maintenance";
 
 // GHOST Agent Builder 2.0
 // Multi-tenant, read-only GitHub understanding, topics -> sources -> skills,
@@ -116,6 +117,7 @@ app.use(plansRouter);
 app.use(dashboardRouter);
 app.use(keysRouter);
 app.use(agentRouter);
+app.use(maintenanceRouter);
 
 // Unknown route -> stable not_found envelope.
 app.use((req: AuthedRequest, res: Response) => {
