@@ -4,35 +4,26 @@ import { Icon } from "../icons";
 import { STEP_KEYS, STEP_META } from "../i18n";
 import type { GhostData } from "../useGhostData";
 
+const MEMORY_CAP = 1500;
+
 export function Sidebar({ g }: { g: GhostData }) {
-  const { t, lang, setLang, theme, setTheme, active, setActive, auth, stats } = g;
+  const { t, active, setActive, auth, stats } = g;
   const counts = (stats?.counts as Record<string, number>) || {};
+  const chunks = counts.knowledge_chunks ?? 0;
+  const memPct = Math.min(100, Math.round((chunks / MEMORY_CAP) * 100));
 
   return (
     <aside className="sidebar">
       <div className="brand">
-        <img src="/ghost-logo.png" alt="GHOST" className="brand-logo" />
-        <div>
-          <strong>GHOST Agent Builder</strong>
+        <span className="brand-logo-box">
+          <img src="/ghost-logo.png" alt="GHOST" className="brand-logo" />
+        </span>
+        <div className="brand-text">
+          <strong>
+            GHOST <span className="brand-accent">Agent Builder</span>
+          </strong>
           <span className="brand-sub">{t.brandSub}</span>
         </div>
-      </div>
-
-      <div className="switchers">
-        <div className="seg">
-          <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>
-            EN
-          </button>
-          <button className={lang === "he" ? "on" : ""} onClick={() => setLang("he")}>
-            HEB
-          </button>
-          <button className={lang === "ru" ? "on" : ""} onClick={() => setLang("ru")}>
-            RU
-          </button>
-        </div>
-        <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="theme">
-          <Icon name={theme === "dark" ? "sun" : "moon"} />
-        </button>
       </div>
 
       <p className="nav-label">{t.workflow}</p>
@@ -48,19 +39,20 @@ export function Sidebar({ g }: { g: GhostData }) {
         ))}
       </nav>
 
-      <div className="mini-stats">
-        <div>
-          <b>{counts.sources ?? "\u2014"}</b>
-          <span>{t.miniSources}</span>
+      <div className="usage-card">
+        <div className="usage-top">
+          <span className="usage-label">{t.memoryLabel}</span>
+          <span className="usage-pct">{memPct}%</span>
         </div>
-        <div>
-          <b>{counts.agent_skills ?? "\u2014"}</b>
-          <span>{t.miniSkills}</span>
+        <div className="usage-val">
+          {chunks.toLocaleString()} / {MEMORY_CAP.toLocaleString()} {t.memoryUnit}
         </div>
-        <div>
-          <b>{counts.projects ?? "\u2014"}</b>
-          <span>{t.miniProjects}</span>
+        <div className="usage-track">
+          <span className="usage-fill" style={{ width: `${memPct}%` }} />
         </div>
+        <button className="usage-btn" onClick={() => setActive("sources")}>
+          <Icon name="learn" /> {t.manage}
+        </button>
       </div>
 
       <div className="user-row">

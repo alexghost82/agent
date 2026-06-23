@@ -9,7 +9,7 @@ import { ResultView } from "../ResultView";
 import { MapModal } from "../MapModal";
 
 export function SkillsPanel({ g }: { g: GhostData }) {
-  const { t, topics, skills, selectedTopic, setSelectedTopic, loading, output, stats } = g;
+  const { t, topics, skills, selectedTopic, setSelectedTopic, loading, output, stats, query } = g;
 
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -21,10 +21,16 @@ export function SkillsPanel({ g }: { g: GhostData }) {
 
   // Group skills by their topic (category). Skills without a known topicId fall
   // under the "Uncategorized" group, which is always ordered last.
+  const q = (query || "").trim().toLowerCase();
   const groups = useMemo(() => {
     const NO_CAT = "\u0000__none__";
+    const visibleSkills = q
+      ? skills.filter((s) =>
+          `${String(s.skillName || "")} ${String(s.description || "")}`.toLowerCase().includes(q)
+        )
+      : skills;
     const map = new Map<string, { categoryId: string; categoryName: string; skills: Json[] }>();
-    for (const s of skills) {
+    for (const s of visibleSkills) {
       const topic = topics.find((tp) => String(tp.id) === String(s.topicId));
       const categoryId = topic ? String(topic.id) : NO_CAT;
       const categoryName = topic ? String(topic.name) : t.noCategory;
@@ -40,7 +46,7 @@ export function SkillsPanel({ g }: { g: GhostData }) {
       if (b.categoryId === NO_CAT) return -1;
       return a.categoryName.localeCompare(b.categoryName);
     });
-  }, [skills, topics, t.noCategory]);
+  }, [skills, topics, t.noCategory, q]);
 
   // The group whose modal is open. Falls back to null if it no longer exists
   // (e.g. all of its skills were deleted while the modal was open).

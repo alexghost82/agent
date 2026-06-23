@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { GhostData } from "../../useGhostData";
 import { Icon } from "../../icons";
 import { ResultView } from "../ResultView";
 import { Pagination, usePaged } from "../Pagination";
 
 export function SourcesPanel({ g }: { g: GhostData }) {
-  const { t, topics, sources, selectedTopic, setSelectedTopic, loading, output } = g;
+  const { t, topics, sources, selectedTopic, setSelectedTopic, loading, output, query } = g;
 
   const [newTopicName, setNewTopicName] = useState("");
   const [newTopicDesc, setNewTopicDesc] = useState("");
@@ -15,7 +15,19 @@ export function SourcesPanel({ g }: { g: GhostData }) {
   const [sourceTags, setSourceTags] = useState("");
   const [deepIngest, setDeepIngest] = useState(false);
 
-  const { page, setPage, pageCount, visible } = usePaged(sources, 8);
+  // Filter the learned sources by the global top-bar search (title or URL).
+  const q = (query || "").trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      q
+        ? sources.filter((s) =>
+            `${String(s.title || "")} ${String(s.url || "")}`.toLowerCase().includes(q)
+          )
+        : sources,
+    [sources, q]
+  );
+
+  const { page, setPage, pageCount, visible } = usePaged(filtered, 8);
 
   async function createTopic() {
     if (newTopicName.trim().length < 2) return;
@@ -114,14 +126,23 @@ export function SourcesPanel({ g }: { g: GhostData }) {
         <>
           <div className="list-head">
             <h3>
-              {t.learnedSources} ({sources.length})
+              {t.learnedSources} ({filtered.length})
             </h3>
             <button className="ghost sm" onClick={() => g.loadSources(selectedTopic)}>
               <Icon name="refresh" /> {t.refreshList}
             </button>
           </div>
-          {sources.length ? (
+          {!sources.length ? (
+            <p className="muted">{t.noSources}</p>
+          ) : !filtered.length ? (
+            <p className="muted">{t.searchEmpty}</p>
+          ) : (
             <>
+              <div className="list-table-head src-grid">
+                <span>{t.learnedSources}</span>
+                <span className="lt-meta">{t.chunksUnit}</span>
+                <span className="lt-act" />
+              </div>
               <ul className="source-list">
                 {visible.map((s) => {
                   const id = String(s.id);
@@ -184,10 +205,13 @@ export function SourcesPanel({ g }: { g: GhostData }) {
                   );
                 })}
               </ul>
-              <Pagination page={page} pageCount={pageCount} setPage={setPage} t={t} />
+              <div className="list-foot">
+                <span className="muted">
+                  {t.showingOf.replace("{a}", String(visible.length)).replace("{b}", String(filtered.length))}
+                </span>
+                <Pagination page={page} pageCount={pageCount} setPage={setPage} t={t} />
+              </div>
             </>
-          ) : (
-            <p className="muted">{t.noSources}</p>
           )}
         </>
       ) : null}

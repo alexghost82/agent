@@ -30,7 +30,7 @@ function IngestProgress({ p, t }: { p: Json; t: any }) {
 }
 
 export function ProjectsPanel({ g }: { g: GhostData }) {
-  const { t, projects, skills, selectedProject, setSelectedProject, selectedSkillIds, loading, output } = g;
+  const { t, projects, skills, selectedProject, setSelectedProject, selectedSkillIds, loading, output, query } = g;
 
   const [createMode, setCreateMode] = useState<"scratch" | "repo">("scratch");
   const [pName, setPName] = useState("");
@@ -61,7 +61,21 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
       return next;
     });
 
-  const { page, setPage, pageCount, visible } = usePaged(projects, 6);
+  // Filter the project list by the global top-bar search.
+  const q = (query || "").trim().toLowerCase();
+  const filteredProjects = useMemo(
+    () =>
+      q
+        ? projects.filter((p) =>
+            `${String(p.name || "")} ${String(p.description || "")} ${String(p.repoUrl || "")}`
+              .toLowerCase()
+              .includes(q)
+          )
+        : projects,
+    [projects, q]
+  );
+
+  const { page, setPage, pageCount, visible } = usePaged(filteredProjects, 6);
 
   async function createProject() {
     await g.createProject({
@@ -186,9 +200,10 @@ export function ProjectsPanel({ g }: { g: GhostData }) {
         <>
           <div className="list-head">
             <h3>
-              {t.steps.projects.title} ({projects.length})
+              {t.steps.projects.title} ({filteredProjects.length})
             </h3>
           </div>
+          {!filteredProjects.length ? <p className="muted">{t.searchEmpty}</p> : null}
           <ul className="task-list">
             {visible.map((p) => {
               const id = String(p.id);

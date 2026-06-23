@@ -35,6 +35,7 @@ export function useGhostData() {
   const [agentRun, setAgentRun] = useState<Json | null>(null);
   const agentBaselineRef = useRef<string | null>(null);
 
+  const [query, setQuery] = useState("");
   const [stats, setStats] = useState<Json | null>(null);
   const [topics, setTopics] = useState<Json[]>([]);
   const [sources, setSources] = useState<Json[]>([]);
@@ -744,6 +745,9 @@ export function useGhostData() {
     // nav
     active,
     setActive,
+    // global search
+    query,
+    setQuery,
     // run state
     loading,
     output,
