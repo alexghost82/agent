@@ -31,15 +31,24 @@ export async function openaiEmbeddingBatch(apiKey: string, inputs: string[]): Pr
     .map((d) => d.embedding);
 }
 
+// Newer OpenAI models (gpt-5 family, the o-series reasoning models) reject any
+// non-default `temperature` with a 400 ("Only the default (1) value is
+// supported"). For those we omit the parameter entirely and let the API use its
+// default; older chat models (gpt-4*, gpt-3.5*) keep honoring the value.
+function supportsCustomTemperature(model: string): boolean {
+  return !/^(gpt-5|o1|o3|o4)/i.test(model.trim());
+}
+
 export async function openaiLlm(
   apiKey: string,
   system: string,
   user: string,
   temperature = 0.2
 ): Promise<string> {
+  const model = process.env.OPENAI_CHAT_MODEL || "gpt-4.1-mini";
   const res = await client(apiKey).chat.completions.create({
-    model: process.env.OPENAI_CHAT_MODEL || "gpt-4.1-mini",
-    temperature,
+    model,
+    ...(supportsCustomTemperature(model) ? { temperature } : {}),
     messages: [
       { role: "system", content: system },
       { role: "user", content: user }

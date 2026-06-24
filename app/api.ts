@@ -3,7 +3,34 @@
 //   server-side logout -> POST /logout (under requireAuth)
 // HTTP status codes are preserved; the client maps stable codes to i18n text.
 
+// Configured API base. Empty/unset -> same-origin "/api", which the Firebase
+// Hosting rewrite (`/api/** -> the `api` function`) serves. A localhost base is
+// only meaningful for local development against the Functions emulator.
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api";
+
+function isLocalHost(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "0.0.0.0";
+}
+
+// Runtime API base with a guard against a dev/emulator base leaking into a
+// production bundle. If NEXT_PUBLIC_API_BASE points at localhost/127.0.0.1 (e.g.
+// a stray `.env.local` was present at `next build` time) but the app is being
+// served from a non-local origin, every request would otherwise be fired at the
+// visitor's own machine and fail — surfacing as "Request failed"/"Load error".
+// In that case we fall back to same-origin "/api". On the server / during static
+// export there is no `window`, so the configured value is returned unchanged.
+export function resolveApiBase(): string {
+  const configured = API_BASE;
+  if (typeof window === "undefined") return configured;
+  try {
+    if (isLocalHost(window.location.hostname)) return configured; // genuine local dev
+    const resolved = new URL(configured, window.location.origin);
+    if (isLocalHost(resolved.hostname)) return "/api"; // dev base leaked into prod
+  } catch {
+    /* relative base ("/api") or unparseable value -> use as-is */
+  }
+  return configured;
+}
 
 export type Json = Record<string, unknown>;
 
@@ -39,7 +66,7 @@ export async function request(
   opts: RequestOptions = {}
 ): Promise<any> {
   const authRedirect = opts.authRedirect ?? true;
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${resolveApiBase()}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...authHeader() },
     body: body === undefined ? undefined : JSON.stringify(body)
@@ -75,7 +102,7 @@ export const delJson = (p: string) => request(p, "DELETE");
 /** Server-side logout (contract §1). Best-effort: never blocks local sign-out. */
 export async function serverLogout(): Promise<void> {
   try {
-    await fetch(`${API_BASE}/logout`, {
+    await fetch(`${resolveApiBase()}/logout`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeader() }
     });

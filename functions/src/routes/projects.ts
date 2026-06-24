@@ -1,7 +1,7 @@
 import { Router, Response } from "express";
 import * as crypto from "crypto";
 import { db } from "../firebase";
-import { serverTime, logEvent } from "../util";
+import { serverTime, logEvent, createProjectWithReadableId } from "../util";
 import { rateLimit } from "../ratelimit";
 import { AuthedRequest } from "../auth";
 import { encryptSecret } from "../crypto";
@@ -40,20 +40,23 @@ projectsRouter.get("/projects", async (req: AuthedRequest, res: Response) => {
 projectsRouter.post("/projects", async (req: AuthedRequest, res: Response) => {
   try {
     const body = ProjectSchema.parse(req.body);
-    const ref = await db.collection("projects").add({
-      userId: req.userId,
-      name: body.name,
-      description: body.description,
-      stack: body.stack || null,
-      repoUrl: body.repoUrl || null,
-      skillIds: [],
-      summary: null,
-      ingestStatus: "none",
-      createdAt: serverTime()
-    });
+    const id = await createProjectWithReadableId(
+      {
+        userId: req.userId,
+        name: body.name,
+        description: body.description,
+        stack: body.stack || null,
+        repoUrl: body.repoUrl || null,
+        skillIds: [],
+        summary: null,
+        ingestStatus: "none",
+        createdAt: serverTime()
+      },
+      body.name
+    );
     await bumpCounter(req.userId!, "projects");
-    await logEvent(req.userId!, "project_created", body.name, { id: ref.id });
-    res.json({ id: ref.id, status: "created" });
+    await logEvent(req.userId!, "project_created", body.name, { id });
+    res.json({ id, status: "created" });
   } catch (err) {
     sendError(req, res, err);
   }

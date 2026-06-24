@@ -1,6 +1,6 @@
 import { Router, Response } from "express";
 import { db } from "../firebase";
-import { serverTime, logEvent } from "../util";
+import { serverTime, logEvent, createProjectWithReadableId } from "../util";
 import { rateLimit } from "../ratelimit";
 import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
@@ -99,17 +99,21 @@ agentRouter.post(
         // Topic + project for this run.
         const topicRef = await db.collection("topics").add({ userId, name, description, createdAt: serverTime() });
         await bumpCounter(userId, "topics");
-        const projectRef = await db.collection("projects").add({
-          userId,
-          name,
-          description,
-          stack: null,
-          repoUrl: null,
-          skillIds: [],
-          summary: null,
-          ingestStatus: "none",
-          createdAt: serverTime()
-        });
+        const projectId = await createProjectWithReadableId(
+          {
+            userId,
+            name,
+            description,
+            stack: null,
+            repoUrl: null,
+            skillIds: [],
+            summary: null,
+            ingestStatus: "none",
+            createdAt: serverTime()
+          },
+          name
+        );
+        const projectRef = db.collection("projects").doc(projectId);
         await bumpCounter(userId, "projects");
 
         // 1) LEARN — ingest every URL (a single bad URL never aborts the run).
