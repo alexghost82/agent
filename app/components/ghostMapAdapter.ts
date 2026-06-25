@@ -23,7 +23,7 @@ export const GHOST_LAYERS: MapLayer[] = [
   { id: "backend", label: "Backend/API", color: "#86efac" },
   { id: "ai", label: "AI/Vision", color: "#c4b5fd" },
   { id: "data", label: "Data/Memory", color: "#fde68a" },
-  { id: "ops", label: "Operations", color: "#fdba74" },
+  { id: "ops", label: "Operations", color: "#fde047" },
   { id: "ux", label: "UX/UI Journey", color: "#bef264" },
   { id: "admin", label: "Admin/Security", color: "#f9a8d4" },
   { id: "risk", label: "Risks/Audit", color: "#fca5a5" }

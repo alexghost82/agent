@@ -173,7 +173,11 @@ export function SourcesPanel({ g }: { g: GhostData }) {
                       ) : it.status === "pending" ? (
                         <span className="ip-state muted">{t.trainingPending}</span>
                       ) : it.status === "failed" ? (
-                        <span className="ip-state ip-fail-text">{it.error || t.trainingFailed}</span>
+                        <span className="ip-state ip-fail-text" title={it.error || ""}>
+                          {(it.error && (t.errorCodes as Record<string, string>)?.[it.error]) ||
+                            it.error ||
+                            t.trainingFailed}
+                        </span>
                       ) : null}
                     </li>
                   ))}

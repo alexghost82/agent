@@ -280,6 +280,7 @@ export const DICT: Record<Lang, any> = {
       github_access_denied: "GitHub denied access. Save a valid token with read access to this repository.",
       github_token_invalid: "Your saved GitHub token could not be read (the server encryption secret changed). Open API Keys / GitHub token, re-enter it, and connect again.",
       github_api_error: "GitHub API returned an error. Please try again shortly.",
+      source_unreachable: "Could not fetch this resource — the page returned an error (e.g. 404) or blocked automated access. Check the URL.",
       internal: "Something went wrong on the server. Please try again."
     },
     edit: "Edit",
@@ -687,6 +688,7 @@ export const DICT: Record<Lang, any> = {
       github_access_denied: "GitHub \u05d7\u05e1\u05dd \u05d2\u05d9\u05e9\u05d4. \u05e9\u05de\u05e8\u05d5 \u05d8\u05d5\u05e7\u05df \u05ea\u05e7\u05d9\u05df \u05e2\u05dd \u05d2\u05d9\u05e9\u05ea \u05e7\u05e8\u05d9\u05d0\u05d4 \u05dc\u05de\u05d0\u05d2\u05e8.",
       github_token_invalid: "\u05dc\u05d0 \u05e0\u05d9\u05ea\u05df \u05dc\u05e7\u05e8\u05d5\u05d0 \u05d0\u05ea \u05d8\u05d5\u05e7\u05df GitHub \u05d4\u05e9\u05de\u05d5\u05e8 (\u05de\u05e4\u05ea\u05d7 \u05d4\u05d4\u05e6\u05e4\u05e0\u05d4 \u05d1\u05e9\u05e8\u05ea \u05d4\u05e9\u05ea\u05e0\u05d4). \u05d4\u05d6\u05d9\u05e0\u05d5 \u05d0\u05d5\u05ea\u05d5 \u05de\u05d7\u05d3\u05e9 \u05d5\u05d4\u05ea\u05d7\u05d1\u05e8\u05d5 \u05e9\u05d5\u05d1.",
       github_api_error: "\u05d4-API \u05e9\u05dc GitHub \u05d4\u05d7\u05d6\u05d9\u05e8 \u05e9\u05d2\u05d9\u05d0\u05d4. \u05e0\u05e1\u05d5 \u05e9\u05d5\u05d1 \u05d1\u05e2\u05d5\u05d3 \u05e8\u05d2\u05e2.",
+      source_unreachable: "\u05dc\u05d0 \u05e0\u05d9\u05ea\u05df \u05dc\u05d8\u05e2\u05d5\u05df \u05d0\u05ea \u05d4\u05de\u05e9\u05d0\u05d1 \u2014 \u05d4\u05d3\u05e3 \u05d4\u05d7\u05d6\u05d9\u05e8 \u05e9\u05d2\u05d9\u05d0\u05d4 (\u05dc\u05de\u05e9\u05dc 404) \u05d0\u05d5 \u05d7\u05e1\u05dd \u05d2\u05d9\u05e9\u05d4 \u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9\u05ea. \u05d1\u05d3\u05e7\u05d5 \u05d0\u05ea \u05d4-URL.",
       internal: "\u05d0\u05d9\u05e8\u05e2\u05d4 \u05ea\u05e7\u05dc\u05d4 \u05d1\u05e9\u05e8\u05ea. \u05e0\u05e1\u05d5 \u05e9\u05d5\u05d1."
     },
     edit: "\u05e2\u05e8\u05d5\u05da",
@@ -1094,6 +1096,7 @@ export const DICT: Record<Lang, any> = {
       github_access_denied: "GitHub отказал в доступе. Сохраните действительный токен с правом чтения этого репозитория.",
       github_token_invalid: "Не удалось прочитать сохранённый токен GitHub (изменился серверный секрет шифрования). Введите токен заново в разделе GitHub-токен и подключите снова.",
       github_api_error: "API GitHub вернул ошибку. Попробуйте снова чуть позже.",
+      source_unreachable: "Не удалось загрузить ресурс — страница вернула ошибку (например, 404) или заблокировала автоматический доступ. Проверьте URL.",
       internal: "Что-то пошло не так на сервере. Попробуйте снова."
     },
     edit: "Изменить",

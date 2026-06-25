@@ -8,6 +8,7 @@ import { MAX_FILE_BYTES, getRepoInfo, fetchTree, fetchRawFile } from "./githubFe
 import { mapWithConcurrency } from "./concurrency";
 import { toVector } from "./vector";
 import { log } from "./log";
+import { AppError } from "./errors";
 
 const EMBED_BATCH = Number(process.env.EMBED_BATCH_SIZE) || 96;
 const WRITE_BATCH = 400;
@@ -99,8 +100,18 @@ export async function ingestUrl(opts: {
     return ingestGithubRepoIntoTopic({ userId, topicId, url, tags, token: opts.githubToken });
   }
 
-  const pages: CrawledPage[] = opts.deep ? await crawlSite(url) : [{ url, ...(await readUrl(url)) }];
-  if (!pages.length) pages.push({ url, ...(await readUrl(url)) });
+  // Fetching a remote page can fail for reasons the user can act on (page 404s,
+  // the site blocks bots, the host is unreachable). Surface those as a stable,
+  // human-readable `source_unreachable` code instead of an opaque 500/internal.
+  let pages: CrawledPage[];
+  try {
+    pages = opts.deep ? await crawlSite(url) : [{ url, ...(await readUrl(url)) }];
+    if (!pages.length) pages.push({ url, ...(await readUrl(url)) });
+  } catch (e: unknown) {
+    if (e instanceof AppError) throw e;
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new AppError("source_unreachable", 502, detail);
+  }
   const rootTitle = pages[0]?.title || url;
 
   const sourceRef = await db.collection("sources").add({

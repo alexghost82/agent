@@ -8,10 +8,10 @@
   --text: #f3f5fa;
   --muted: #9aa3b5;
   --muted-2: #6b7488;
-  --accent: #f97316;
-  --accent-2: #fb923c;
-  --accent-rgb: 249, 115, 22;
-  --accent-2-rgb: 251, 146, 60;
+  --accent: #eab308;
+  --accent-2: #facc15;
+  --accent-rgb: 234, 179, 8;
+  --accent-2-rgb: 250, 204, 21;
   --ok: #34d399;
   --warn: #f59e0b;
   --danger: #f87171;
@@ -38,10 +38,10 @@
   --text: #11151d;
   --muted: #5a6477;
   --muted-2: #8893a6;
-  --accent: #ea580c;
-  --accent-2: #f97316;
-  --accent-rgb: 234, 88, 12;
-  --accent-2-rgb: 249, 115, 22;
+  --accent: #ca8a04;
+  --accent-2: #eab308;
+  --accent-rgb: 202, 138, 4;
+  --accent-2-rgb: 234, 179, 8;
   --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.08);
   --shadow-md: 0 10px 26px rgba(15, 23, 42, 0.12);
   --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.16);
@@ -1064,7 +1064,7 @@ textarea.url-multi { min-height: 78px; }
   --nt-service: #06b6d4;
   --nt-dbModel: #ec4899;
   --nt-component: #a78bfa;
-  --nt-worker: #f97316;
+  --nt-worker: #facc15;
   --nt-config: #94a3b8;
   --nt-test: #84cc16;
   --nt-documentation: #64748b;
@@ -1306,7 +1306,7 @@ textarea.url-multi { min-height: 78px; }
   --dm-border-strong: rgba(15, 23, 42, 0.22);
   --dm-text: #1f2733;
   --dm-muted: #5b6573;
-  --dm-accent: #f97316;
+  --dm-accent: #eab308;
 }
 
 /* Host wrapper (in the panel): controls the map's height and lets the user

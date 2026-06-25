@@ -6,7 +6,16 @@ import { renderWithJs, jsRenderEnabled, JS_RENDER_MIN_TEXT } from "./render";
 import { extractPdfText } from "./pdf";
 import { log } from "./log";
 
-const USER_AGENT = "GHOST-Agent-Builder/1.0 (read-only)";
+// A realistic desktop-browser User-Agent. Many public sites (Cloudflare and
+// other bot shields) answer a self-identifying crawler UA with 403/404 even
+// though the page renders fine in a browser, which previously surfaced as
+// "source_unreachable" for perfectly valid resources. Default browser-like
+// Accept headers are sent alongside for the same reason.
+const USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const DEFAULT_ACCEPT =
+  "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8";
+const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
 const FETCH_TIMEOUT_MS = 15000;
 // Default cap on extracted page/PDF text. Overridable via READ_URL_MAX_CHARS so
 // deployments can trade memory for completeness without a code change.
@@ -224,7 +233,12 @@ async function secureFetch(
 
     const dispatcher = createPinnedDispatcher(verified.url, verified.addresses);
     const fetchInit: Record<string, unknown> = {
-      headers: { "User-Agent": USER_AGENT, ...(init.headers ?? {}) },
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: DEFAULT_ACCEPT,
+        "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+        ...(init.headers ?? {})
+      },
       redirect: "manual"
     };
     if (init.signal) fetchInit.signal = init.signal;
