@@ -1,16 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { Icon } from "../icons";
 import { STEP_KEYS, STEP_META } from "../i18n";
 import type { GhostData } from "../useGhostData";
 
-const MEMORY_CAP = 1500;
-
 export function Sidebar({ g }: { g: GhostData }) {
-  const { t, active, setActive, auth, stats } = g;
-  const counts = (stats?.counts as Record<string, number>) || {};
-  const chunks = counts.knowledge_chunks ?? 0;
-  const memPct = Math.min(100, Math.round((chunks / MEMORY_CAP) * 100));
+  const { t, active, setActive, auth } = g;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const initial = auth?.username?.charAt(0).toUpperCase() || "?";
 
   return (
     <aside className="sidebar">
@@ -20,15 +18,19 @@ export function Sidebar({ g }: { g: GhostData }) {
         </span>
         <div className="brand-text">
           <strong>
-            GHOST <span className="brand-accent">Agent Builder</span>
+            GHOST
           </strong>
-          <span className="brand-sub">{t.brandSub}</span>
+          <span className="brand-sub">AGENT BUILDER</span>
         </div>
       </div>
 
       <nav className="nav">
         {STEP_KEYS.map((key) => (
-          <button key={key} className={`nav-item ${active === key ? "is-active" : ""}`} onClick={() => setActive(key)}>
+          <button
+            key={key}
+            className={`nav-item ${active === key ? "is-active" : ""}`}
+            onClick={() => setActive(key)}
+          >
             <span className="nav-ic">
               <Icon name={STEP_META[key].icon} />
             </span>
@@ -37,27 +39,28 @@ export function Sidebar({ g }: { g: GhostData }) {
         ))}
       </nav>
 
-      <div className="usage-card">
-        <div className="usage-top">
-          <span className="usage-label">{t.memoryLabel}</span>
-          <span className="usage-pct">{memPct}%</span>
-        </div>
-        <div className="usage-val">
-          {chunks.toLocaleString()} / {MEMORY_CAP.toLocaleString()} {t.memoryUnit}
-        </div>
-        <div className="usage-track">
-          <span className="usage-fill" style={{ width: `${memPct}%` }} />
-        </div>
-        <button className="usage-btn" onClick={() => setActive("sources")}>
-          <Icon name="learn" /> {t.manage}
-        </button>
-      </div>
-
-      <div className="user-row">
-        <span className="user-ava">{auth?.username.charAt(0).toUpperCase()}</span>
-        <span className="user-name">{auth?.username}</span>
-        <button className="logout" onClick={g.logout} title={t.login.logout} aria-label={t.login.logout}>
-          <Icon name="logout" />
+      <div className="user-block">
+        {menuOpen ? (
+          <div className="user-menu" onMouseLeave={() => setMenuOpen(false)}>
+            <button className="user-menu-item" onClick={g.logout}>
+              <Icon name="logout" /> {t.login.logout}
+            </button>
+          </div>
+        ) : null}
+        <button
+          className="user-row"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-haspopup="true"
+          aria-expanded={menuOpen}
+        >
+          <span className="user-ava">{initial}</span>
+          <span className="user-name">
+            <span className="user-name-main">{auth?.username}</span>
+            <span className="user-plan">{t.proPlan}</span>
+          </span>
+          <span className={`user-caret ${menuOpen ? "is-open" : ""}`}>
+            <Icon name="chevronDown" />
+          </span>
         </button>
       </div>
     </aside>

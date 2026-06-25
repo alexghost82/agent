@@ -82,6 +82,10 @@ export async function ingestUrl(opts: {
   url: string;
   tags?: string[];
   deep?: boolean;
+  // The caller's decrypted GitHub PAT, forwarded to repo ingestion so Sources
+  // GitHub links authenticate as the user (avoids the 60 req/hour anonymous
+  // rate limit that otherwise surfaces as github_access_denied on public repos).
+  githubToken?: string;
 }): Promise<IngestResult> {
   const { userId, topicId, url } = opts;
   const tags = opts.tags || [];
@@ -92,7 +96,7 @@ export async function ingestUrl(opts: {
   // tree into topic-scoped chunks (chosen: full repo-into-topic indexing).
   const classified = classifyResourceUrl(url);
   if (classified.kind === "github_repo") {
-    return ingestGithubRepoIntoTopic({ userId, topicId, url, tags });
+    return ingestGithubRepoIntoTopic({ userId, topicId, url, tags, token: opts.githubToken });
   }
 
   const pages: CrawledPage[] = opts.deep ? await crawlSite(url) : [{ url, ...(await readUrl(url)) }];

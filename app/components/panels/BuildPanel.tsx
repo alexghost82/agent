@@ -10,6 +10,35 @@ import { ResultSkeleton } from "../Skeleton";
 
 type BuildFile = { path: string; content: string };
 
+// Format a stored timestamp (Firestore admin serializes to { _seconds, … },
+// but it may also arrive as a number or ISO string) into a readable date.
+function fmtDate(raw: any): string {
+  let ms = NaN;
+  if (typeof raw === "number") ms = raw;
+  else if (typeof raw === "string") ms = Date.parse(raw);
+  else if (raw && typeof raw === "object") {
+    const s = raw._seconds ?? raw.seconds;
+    if (typeof s === "number") ms = s * 1000;
+  }
+  return Number.isNaN(ms) ? "" : new Date(ms).toLocaleString();
+}
+
+// Human-readable label for a saved plan in the picker. Plan docs have no title,
+// so we build one from the date, file count and the first prompt title / file
+// name — never the raw document id.
+function planLabel(p: any, t: any): string {
+  const files: any[] = Array.isArray(p.files) ? p.files : [];
+  const prompts: any[] = Array.isArray(p.prompts) ? p.prompts : [];
+  const hint = String(prompts.find((x) => x?.title)?.title || files[0]?.path || "").trim();
+  const parts: string[] = [];
+  const date = fmtDate(p.createdAt);
+  if (date) parts.push(date);
+  parts.push(`${files.length} ${t.buildFilesCount}`);
+  let label = parts.join(" \u00b7 ");
+  if (hint) label += ` \u2014 ${hint}`;
+  return label || String(p.id);
+}
+
 const STATUS_CLASS: Record<string, string> = {
   running: "in_progress",
   ready: "ready",
@@ -104,7 +133,7 @@ export function BuildPanel({ g }: { g: GhostData }) {
           <option value="">{t.planOptionNone}</option>
           {plans.map((p) => (
             <option key={String(p.id)} value={String(p.id)}>
-              {String(p.title || p.summary || p.id)}
+              {planLabel(p, t)}
             </option>
           ))}
         </select>
@@ -181,7 +210,7 @@ export function BuildPanel({ g }: { g: GhostData }) {
             return (
               <li key={id || i}>
                 <div className="file-head">
-                  <b>{String(b.summary || id)}</b>
+                  <b>{String(b.summary || `${b.projectName || ""} ${fmtDate(b.createdAt)}`.trim() || id)}</b>
                   <span className="row-actions">
                     <StatusBadge status={String(b.status || "")} t={t} />
                     <VerificationBadge verification={(b as any).verification} t={t} />

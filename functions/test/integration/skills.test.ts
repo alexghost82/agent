@@ -11,6 +11,7 @@ import {
   addDoc,
   expectError,
   stashEnv,
+  db,
   type TestServer
 } from "../helpers/harness";
 
@@ -86,5 +87,88 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: skills router", () => {
     const topicId = await addDoc("topics", { userId: user.userId, name: "Owned topic" });
     const res = await srv.request("POST", "/extract-skills", { token: user.token, body: { topicId } });
     expectError(res, 400, "no_api_key");
+  });
+
+  it("rejects unauthenticated PATCH/DELETE (401)", async () => {
+    expectError(await srv.request("PATCH", "/skills/x", { body: { skillName: "n" } }), 401, "unauthorized");
+    expectError(await srv.request("DELETE", "/skills/x"), 401, "unauthorized");
+  });
+
+  it("returns 404 patching/deleting a skill the caller does not own", async () => {
+    const owner = await seedUser();
+    const other = await seedUser();
+    const skillId = await addDoc("agent_skills", {
+      userId: owner.userId,
+      topicId: "t",
+      skillName: "Owned",
+      description: "owned skill"
+    });
+    expectError(
+      await srv.request("PATCH", `/skills/${skillId}`, { token: other.token, body: { skillName: "Hijack" } }),
+      404,
+      "not_found"
+    );
+    expectError(await srv.request("DELETE", `/skills/${skillId}`, { token: other.token }), 404, "not_found");
+    // Untouched by the unauthorized calls.
+    expect((await db.collection("agent_skills").doc(skillId).get()).data()?.skillName).toBe("Owned");
+  });
+
+  it("rejects an empty PATCH body (validation, 400)", async () => {
+    const user = await seedUser();
+    const skillId = await addDoc("agent_skills", {
+      userId: user.userId,
+      topicId: "t",
+      skillName: "Editable",
+      description: "before edit"
+    });
+    expectError(
+      await srv.request("PATCH", `/skills/${skillId}`, { token: user.token, body: {} }),
+      400,
+      "validation_failed"
+    );
+  });
+
+  it("updates an owned skill and recomputes quality", async () => {
+    const user = await seedUser();
+    const skillId = await addDoc("agent_skills", {
+      userId: user.userId,
+      topicId: "t",
+      skillName: "Before",
+      description: "old description",
+      example: null,
+      appliesTo: [],
+      template: null,
+      quality: { score: 0 }
+    });
+    const res = await srv.request("PATCH", `/skills/${skillId}`, {
+      token: user.token,
+      body: { skillName: "After", description: "a richer, more detailed description", example: "do X then Y" }
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("updated");
+
+    const stored = (await db.collection("agent_skills").doc(skillId).get()).data()!;
+    expect(stored.skillName).toBe("After");
+    expect(stored.description).toBe("a richer, more detailed description");
+    expect(stored.example).toBe("do X then Y");
+    expect(typeof stored.quality?.score).toBe("number");
+    expect(stored.updatedAt).toBeTruthy();
+  });
+
+  it("deletes an owned skill", async () => {
+    const user = await seedUser();
+    const skillId = await addDoc("agent_skills", {
+      userId: user.userId,
+      topicId: "t",
+      skillName: "Disposable",
+      description: "to be removed"
+    });
+    const res = await srv.request("DELETE", `/skills/${skillId}`, { token: user.token });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("deleted");
+    expect((await db.collection("agent_skills").doc(skillId).get()).exists).toBe(false);
+
+    const list = await srv.request("GET", "/skills", { token: user.token });
+    expect(list.body.skills.find((s: any) => s.id === skillId)).toBeUndefined();
   });
 });

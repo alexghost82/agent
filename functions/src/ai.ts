@@ -165,6 +165,14 @@ export async function embeddingBatch(inputs: string[], userId: string): Promise<
   return raw.map((v) => normalizeEmbedding(v, TARGET_EMBED_DIM));
 }
 
+// Fast, side-effect-free check that the caller has a usable AI key for their
+// active provider (user key or server env). Throws Error("no_api_key") — which
+// the error layer maps to HTTP 400 — so async endpoints can fail fast and
+// synchronously BEFORE enqueuing a background job that would only fail later.
+export async function assertAiKeyAvailable(userId: string): Promise<void> {
+  await resolve(userId);
+}
+
 export async function llm(
   system: string,
   user: string,

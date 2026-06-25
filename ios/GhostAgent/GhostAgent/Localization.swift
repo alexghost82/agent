@@ -191,17 +191,6 @@ struct Strings {
             "verifyStatusFailed": "Failed",
             "verifyStatusSkipped": "Skipped",
             "verifyStatusError": "Error",
-            "agentExplain": "Full autopilot: paste resource links and describe the task. The agent learns the links, extracts skills, auto-picks the relevant ones, then designs, plans and produces a verified build — all in one run. Nothing is written to your GitHub repo.",
-            "agentUrlsLabel": "Resource URLs (one per line)",
-            "agentTaskLabel": "Task",
-            "agentTaskPlaceholder": "Describe what to build, e.g. “A TypeScript CLI that summarizes RSS feeds”…",
-            "agentDeepLabel": "Deep crawl each link (same-origin)",
-            "agentRunBtn": "Run autopilot",
-            "agentRunning": "Agent is running the full cycle…",
-            "agentNoRunYet": "No autopilot run yet.",
-            "agentSteps": "Progress",
-            "agentResultFiles": "Build files",
-            "agentPastRuns": "Autopilot runs",
             "memoryExplain": "Everything the agent has stored is here: each knowledge chunk it learned from your sources and projects. Browse, search and delete what it remembers. The raw embedding vector is never shown.",
             "memorySearch": "Search memory…",
             "memoryEmpty": "No memory yet. Learn sources or connect a project.",
@@ -234,15 +223,6 @@ struct Strings {
                 "ready": "Ready",
                 "error": "Error"
             ],
-            "agentStepNames": [
-                "learning": "Learning",
-                "skilling": "Extracting skills",
-                "designing": "Designing",
-                "planning": "Planning",
-                "building": "Building",
-                "ready": "Ready",
-                "error": "Error"
-            ],
             "stepTitle": [
                 "overview": "Overview",
                 "sources": "Sources",
@@ -252,7 +232,6 @@ struct Strings {
                 "design": "Design Platform",
                 "plan": "Plan",
                 "build": "Build",
-                "autorun": "Autopilot",
                 "memory": "Memory",
                 "settings": "API Keys"
             ],
@@ -265,7 +244,6 @@ struct Strings {
                 "design": "Design an update for a selected project",
                 "plan": "Generate detailed md files and agent prompts",
                 "build": "Generate real project files from a plan and instructions",
-                "autorun": "Run the full learn → build cycle from links and a task",
                 "memory": "Browse and manage the knowledge chunks the agent stored",
                 "settings": "Add your own OpenAI and Gemini keys and pick the active provider"
             ],
@@ -470,17 +448,6 @@ struct Strings {
             "verifyStatusFailed": "נכשל",
             "verifyStatusSkipped": "דולג",
             "verifyStatusError": "שגיאה",
-            "agentExplain": "טייס אוטומטי מלא: הדביקו קישורים למקורות ותארו את המשימה. הסוכן לומד את הקישורים, מפיק כישורים, בוחר אותם אוטומטית, ואז מתכנן, מתכנן ובונה בנייה מאומתת — הכל בהרצה אחת. שום דבר לא נכתב ל-GitHub שלכם.",
-            "agentUrlsLabel": "כתובות מקורות (אחת בכל שורה)",
-            "agentTaskLabel": "משימה",
-            "agentTaskPlaceholder": "תארו מה לבנות…",
-            "agentDeepLabel": "סריקה עמוקה לכל קישור (אותו מקור)",
-            "agentRunBtn": "הפעל טייס אוטומטי",
-            "agentRunning": "הסוכן מריץ את כל המחזור…",
-            "agentNoRunYet": "עדיין אין הרצה.",
-            "agentSteps": "התקדמות",
-            "agentResultFiles": "קבצי בנייה",
-            "agentPastRuns": "הרצות אוטומטיות",
             "memoryExplain": "כל מה שהסוכן שמר נמצא כאן: כל מקטע ידע שלמד מהמקורות והפרויקטים שלכם. עיינו, חפשו ומחקו את מה שהוא זוכר. וקטור ההטמעה הגולמי לעולם אינו מוצג.",
             "memorySearch": "חיפוש בזיכרון…",
             "memoryEmpty": "אין זיכרון עדיין. למדו מקורות או חברו פרויקט.",
@@ -513,15 +480,6 @@ struct Strings {
                 "ready": "מוכן",
                 "error": "שגיאה"
             ],
-            "agentStepNames": [
-                "learning": "לומד",
-                "skilling": "מפיק כישורים",
-                "designing": "מתכנן",
-                "planning": "מתכנן",
-                "building": "בונה",
-                "ready": "מוכן",
-                "error": "שגיאה"
-            ],
             "stepTitle": [
                 "overview": "סקירה",
                 "sources": "מקורות",
@@ -531,7 +489,6 @@ struct Strings {
                 "design": "תכנון פלטפורמה",
                 "plan": "תוכנית",
                 "build": "בנייה",
-                "autorun": "טייס אוטומטי",
                 "memory": "זיכרון",
                 "settings": "מפתחות API"
             ],
@@ -544,7 +501,6 @@ struct Strings {
                 "design": "תכננו עדכון לפרויקט שנבחר",
                 "plan": "צרו קבצי md מפורטים ופרומפטים לסוכנים",
                 "build": "צרו קבצי פרויקט אמיתיים מתוכנית והנחיות",
-                "autorun": "הריצו את כל מחזור הלמידה → בנייה מקישורים ומשימה",
                 "memory": "עיינו ונהלו את מקטעי הידע שהסוכן שמר",
                 "settings": "הוסיפו מפתחות OpenAI ו-Gemini משלכם ובחרו ספק פעיל"
             ],
@@ -749,17 +705,6 @@ struct Strings {
             "verifyStatusFailed": "Не пройдена",
             "verifyStatusSkipped": "Пропущена",
             "verifyStatusError": "Ошибка",
-            "agentExplain": "Полный автопилот: вставьте ссылки на ресурсы и опишите задачу. Агент изучит ссылки, извлечёт навыки, сам подберёт подходящие, затем спроектирует, спланирует и соберёт проверенную сборку — всё за один запуск. Ничего не записывается в ваш GitHub-репозиторий.",
-            "agentUrlsLabel": "URL ресурсов (по одному в строке)",
-            "agentTaskLabel": "Задача",
-            "agentTaskPlaceholder": "Опишите, что построить, например «CLI на TypeScript, который делает сводку RSS-лент»…",
-            "agentDeepLabel": "Глубокий обход каждой ссылки (в пределах домена)",
-            "agentRunBtn": "Запустить автопилот",
-            "agentRunning": "Агент проходит весь цикл…",
-            "agentNoRunYet": "Запусков автопилота пока нет.",
-            "agentSteps": "Прогресс",
-            "agentResultFiles": "Файлы сборки",
-            "agentPastRuns": "Запуски автопилота",
             "memoryExplain": "Здесь всё, что сохранил агент: каждый фрагмент знаний, который он усвоил из ваших источников и проектов. Просматривайте, ищите и удаляйте то, что он помнит. Сырой вектор эмбеддинга никогда не показывается.",
             "memorySearch": "Поиск по памяти…",
             "memoryEmpty": "Память пока пуста. Изучите источники или подключите проект.",
@@ -792,15 +737,6 @@ struct Strings {
                 "ready": "Готово",
                 "error": "Ошибка"
             ],
-            "agentStepNames": [
-                "learning": "Изучение",
-                "skilling": "Извлечение навыков",
-                "designing": "Проектирование",
-                "planning": "Планирование",
-                "building": "Сборка",
-                "ready": "Готово",
-                "error": "Ошибка"
-            ],
             "stepTitle": [
                 "overview": "Обзор",
                 "sources": "Источники",
@@ -810,7 +746,6 @@ struct Strings {
                 "design": "Дизайн платформы",
                 "plan": "План",
                 "build": "Сборка",
-                "autorun": "Автопилот",
                 "memory": "Память",
                 "settings": "API-ключи"
             ],
@@ -823,7 +758,6 @@ struct Strings {
                 "design": "Спроектируйте обновление для выбранного проекта",
                 "plan": "Сгенерируйте подробные md-файлы и промпты для агентов",
                 "build": "Сгенерируйте реальные файлы проекта из плана и инструкций",
-                "autorun": "Запустите весь цикл изучение → сборка из ссылок и задачи",
                 "memory": "Просматривайте и управляйте фрагментами знаний агента",
                 "settings": "Добавьте свои ключи OpenAI и Gemini и выберите активного провайдера"
             ],

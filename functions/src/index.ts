@@ -25,6 +25,7 @@ import { sourcesRouter } from "./routes/sources";
 import { skillsRouter } from "./routes/skills";
 import { projectsRouter } from "./routes/projects";
 import { buildRouter } from "./routes/build";
+import { aiJobsRouter } from "./routes/aiJobs";
 import { memoryRouter } from "./routes/memory";
 import { askRouter } from "./routes/ask";
 import { designRouter } from "./routes/design";
@@ -114,6 +115,7 @@ app.use(askRouter);
 app.use(designRouter);
 app.use(designMapRouter);
 app.use(plansRouter);
+app.use(aiJobsRouter);
 app.use(dashboardRouter);
 app.use(keysRouter);
 app.use(agentRouter);
@@ -190,3 +192,8 @@ export { ingestWorker } from "./tasks";
 // Async project-intelligence scan worker. `/projects/:id/scan` only enqueues;
 // the heavy structure/dependency analysis runs here out of band with retries.
 export { scanWorker } from "./projectScan";
+
+// Async AI job worker (plan / build / design). The corresponding routes only
+// ENQUEUE; the slow LLM work runs here out of band so it is not capped by
+// Firebase Hosting's 60s rewrite timeout. The client polls GET /ai-jobs/:id.
+export { aiJobWorker } from "./aiJobs";

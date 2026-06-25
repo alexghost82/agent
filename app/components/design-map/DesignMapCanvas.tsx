@@ -332,6 +332,11 @@ export function DesignMapCanvas({
           nodeTypes={nodeTypes}
           deleteKeyCode={["Backspace", "Delete"]}
           fitView
+          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+          minZoom={0.05}
+          maxZoom={2.5}
+          zoomOnScroll
+          panOnScroll={false}
           proOptions={{ hideAttribution: false }}
         >
           <Background />

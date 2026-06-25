@@ -181,7 +181,6 @@ enum StepKey: String, CaseIterable, Identifiable {
     case design
     case plan
     case build
-    case autorun
     case memory
     case settings
 
@@ -189,7 +188,7 @@ enum StepKey: String, CaseIterable, Identifiable {
 
     var number: String {
         switch self {
-        case .overview, .autorun, .memory, .settings: return "•"
+        case .overview, .memory, .settings: return "•"
         case .sources: return "1"
         case .skills: return "2"
         case .projects: return "3"
@@ -210,7 +209,6 @@ enum StepKey: String, CaseIterable, Identifiable {
         case .design: return "chart.line.uptrend.xyaxis"
         case .plan: return "chevron.left.forwardslash.chevron.right"
         case .build: return "hammer"
-        case .autorun: return "wand.and.stars"
         case .memory: return "memorychip"
         case .settings: return "key"
         }
@@ -250,89 +248,3 @@ struct KeyInfo: Decodable, Equatable {
     let updatedAt: String?
 }
 
-// MARK: - Autonomous agent (Autorun, Epic 3)
-
-/// One generated build file, in parity with the backend `build.files[]` shape
-/// (`{ path, content, language?, bytes? }`). Shared by `AgentRunResult` and the
-/// regular build flow.
-struct BuildFileDTO: Decodable, Identifiable, Equatable {
-    let path: String
-    let content: String
-    let language: String?
-    let bytes: Int?
-
-    var id: String { path }
-}
-
-/// A single orchestration step of an agent run (learn → skill → design → plan →
-/// build). `detail` is an optional human-readable note (e.g. "2/3 urls").
-struct AgentStep: Decodable, Identifiable, Equatable {
-    let name: String
-    let status: String
-    let detail: String?
-
-    var id: String { "\(name)-\(status)" }
-}
-
-/// Synchronous result of `POST /agent/run`: the final verified build files plus
-/// the orchestration steps and the ids of the entities the run created.
-struct AgentRunResult: Decodable, Equatable {
-    let runId: String
-    let topicId: String?
-    let projectId: String?
-    let buildRunId: String?
-    let files: [BuildFileDTO]
-    let summary: String
-    let steps: [AgentStep]
-
-    enum CodingKeys: String, CodingKey {
-        case runId, topicId, projectId, buildRunId, files, summary, steps
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        runId = try c.decode(String.self, forKey: .runId)
-        topicId = (try? c.decodeIfPresent(String.self, forKey: .topicId)) ?? nil
-        projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
-        buildRunId = (try? c.decodeIfPresent(String.self, forKey: .buildRunId)) ?? nil
-        files = (try? c.decode([BuildFileDTO].self, forKey: .files)) ?? []
-        summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
-        steps = (try? c.decode([AgentStep].self, forKey: .steps)) ?? []
-    }
-}
-
-/// An owned agent run as stored server-side, returned by `GET /agent/runs/:id`
-/// (wrapped in `{ run }`) and `GET /agent/runs` (a `{ runs }` list). `summary`
-/// is optional because the run document only carries it once the build is ready.
-struct AgentRun: Decodable, Identifiable, Equatable {
-    let id: String
-    let status: String
-    let steps: [AgentStep]
-    let summary: String?
-    let task: String?
-    let buildRunId: String?
-    let projectId: String?
-    let topicId: String?
-    let errorCode: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, status, steps, summary, task, buildRunId, projectId, topicId, errorCode
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        status = (try? c.decode(String.self, forKey: .status)) ?? ""
-        steps = (try? c.decode([AgentStep].self, forKey: .steps)) ?? []
-        summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
-        task = (try? c.decodeIfPresent(String.self, forKey: .task)) ?? nil
-        buildRunId = (try? c.decodeIfPresent(String.self, forKey: .buildRunId)) ?? nil
-        projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
-        topicId = (try? c.decodeIfPresent(String.self, forKey: .topicId)) ?? nil
-        errorCode = (try? c.decodeIfPresent(String.self, forKey: .errorCode)) ?? nil
-    }
-}
-
-/// Response envelopes for the agent-run read endpoints.
-struct AgentRunEnvelope: Decodable, Equatable { let run: AgentRun }
-struct AgentRunsEnvelope: Decodable, Equatable { let runs: [AgentRun] }

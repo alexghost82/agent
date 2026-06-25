@@ -33,9 +33,9 @@ function VerificationBadge({ verification, t }: { verification: any; t: any }) {
   );
 }
 
-// Full-autopilot panel (Epic 3.4): a list of resource URLs + a task description
-// drive the whole learn → skills → design → plan → verified build cycle in one
-// call, with live progress steps and the resulting verified build files.
+// Full-autopilot panel: a list of resource URLs + a task description drive the
+// whole learn → skills → design → plan → verified build cycle in one call, with
+// live progress steps and the resulting verified build files.
 export function AgentPanel({ g }: { g: GhostData }) {
   const { t, loading, output } = g;
   const [urls, setUrls] = useState("");

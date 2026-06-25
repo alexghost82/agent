@@ -15,6 +15,7 @@ export const COUNTED_COLLECTIONS = [
   "projects",
   "project_decisions",
   "generated_plans",
+  "build_runs",
   "agent_logs"
 ] as const;
 

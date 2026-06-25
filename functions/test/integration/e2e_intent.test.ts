@@ -166,6 +166,20 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: e2e product cycle (learn → 
     return false;
   }
 
+  // design / generate-plan / build are async: the POST enqueues a job (run
+  // inline under the emulator) and returns { jobId }. Poll until it finishes and
+  // return the job's stored result (or throw on a job error).
+  async function awaitJob(token: string, jobId: string): Promise<any> {
+    for (let i = 0; i < 200; i++) {
+      const j = await srv.request("GET", `/ai-jobs/${jobId}`, { token });
+      expect(j.status).toBe(200);
+      if (j.body.status === "done") return j.body.result;
+      if (j.body.status === "error") throw new Error(`job ${jobId} failed: ${j.body.errorCode}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`job ${jobId} did not finish in time`);
+  }
+
   it("runs the full product cycle with mocked AI + URL fetch", async () => {
     // 1) LOGIN — real password login issues a session bearer.
     const creds = await seedLoginUser("e2e-password-123");
@@ -216,44 +230,50 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: e2e product cycle (learn → 
     const projectId = projectRes.body.id as string;
     expect(typeof projectId).toBe("string");
 
-    // 6) DESIGN — generateAnswer → plain-text design content.
+    // 6) DESIGN — async job → generateAnswer → plain-text design content.
     const designRes = await srv.request("POST", "/design", {
       token,
       body: { projectId, section: "Spin up the core agent loop" }
     });
     if (!aiBlocked(designRes, "design")) {
-      expect(designRes.status).toBe(200);
-      expect(typeof designRes.body.plan).toBe("string");
-      expect(designRes.body.plan.length).toBeGreaterThan(0);
+      expect(designRes.status).toBe(202);
+      const design = await awaitJob(token, designRes.body.jobId as string);
+      expect(typeof design.plan).toBe("string");
+      expect(design.plan.length).toBeGreaterThan(0);
     }
 
-    // 7) GENERATE-PLAN — LLM stub → md files + one orchestrator prompt.
+    // 7) GENERATE-PLAN — async job → md files + one orchestrator prompt.
     const planRes = await srv.request("POST", "/generate-plan", {
       token,
       body: { projectId, instructions: "Keep it minimal but complete." }
     });
     let planId: string | undefined;
     if (!aiBlocked(planRes, "generate-plan")) {
-      expect(planRes.status).toBe(200);
-      expect(Array.isArray(planRes.body.files)).toBe(true);
-      expect(planRes.body.files.length).toBeGreaterThanOrEqual(1);
-      planId = planRes.body.id as string;
+      expect(planRes.status).toBe(202);
+      const plan = await awaitJob(token, planRes.body.jobId as string);
+      expect(Array.isArray(plan.files)).toBe(true);
+      expect(plan.files.length).toBeGreaterThanOrEqual(1);
+      planId = plan.id as string;
     }
 
-    // 8) BUILD — runBuild (LLM stub) → real files, then static verification.
+    // 8) BUILD — async job → real files, then static verification.
     const buildRes = await srv.request("POST", `/projects/${projectId}/build`, {
       token,
       body: planId ? { planId } : {}
     });
     if (!aiBlocked(buildRes, "build")) {
-      expect(buildRes.status).toBe(200);
-      expect(buildRes.body.status).toBe("ready");
-      // Build returns ≥1 file …
-      expect(Array.isArray(buildRes.body.files)).toBe(true);
-      expect(buildRes.body.files.length).toBeGreaterThanOrEqual(1);
+      expect(buildRes.status).toBe(202);
+      const build = await awaitJob(token, buildRes.body.jobId as string);
+      expect(build.status).toBe("ready");
+      // The compact build result reports ≥1 file …
+      expect(build.fileCount).toBeGreaterThanOrEqual(1);
       // … and verification ran without an infra error.
-      expect(buildRes.body.verification).toBeTruthy();
-      expect(buildRes.body.verification.status).not.toBe("error");
+      expect(build.verification).toBeTruthy();
+      expect(build.verification.status).not.toBe("error");
+      // The files themselves are persisted as artifacts under the build run.
+      const full = await srv.request("GET", `/builds/${build.id}`, { token });
+      expect(full.status).toBe(200);
+      expect(full.body.artifacts.length).toBeGreaterThanOrEqual(1);
     }
   });
 });

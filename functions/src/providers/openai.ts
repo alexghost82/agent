@@ -6,10 +6,22 @@ import { LruCache } from "../lru";
 // cap bounds memory on long-lived instances that see many distinct keys.
 const clients = new LruCache<string, OpenAI>(Number(process.env.PROVIDER_CLIENT_CACHE_MAX) || 50);
 
+// Per-request bounds so a single slow/stalled OpenAI call can't hang a worker
+// for tens of minutes (the SDK defaults are a 600s timeout with 2 retries, i.e.
+// up to ~30 min of wall-clock on a stuck request). Both are env-overridable.
+function clientTimeoutMs(): number {
+  const n = Number(process.env.OPENAI_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 240_000;
+}
+function clientMaxRetries(): number {
+  const n = Number(process.env.OPENAI_MAX_RETRIES);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1;
+}
+
 function client(apiKey: string): OpenAI {
   let c = clients.get(apiKey);
   if (!c) {
-    c = new OpenAI({ apiKey });
+    c = new OpenAI({ apiKey, timeout: clientTimeoutMs(), maxRetries: clientMaxRetries() });
     clients.set(apiKey, c);
   }
   return c;

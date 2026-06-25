@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { GhostData } from "../../useGhostData";
 import { Icon } from "../../icons";
+import { Markdown } from "../../markdown";
 import { ResultView } from "../ResultView";
 import { FlowMap } from "../FlowMap";
 import { MapModal } from "../MapModal";
@@ -14,6 +15,19 @@ type PickerState =
   | { kind: "skill"; position?: { x: number; y: number } }
   | { kind: "podskill"; position?: { x: number; y: number }; skillId: string }
   | null;
+
+// Format a stored timestamp (Firestore admin serializes to { _seconds, … },
+// but it may also arrive as a number or ISO string) into a readable date.
+function fmtDate(raw: any): string {
+  let ms = NaN;
+  if (typeof raw === "number") ms = raw;
+  else if (typeof raw === "string") ms = Date.parse(raw);
+  else if (raw && typeof raw === "object") {
+    const s = raw._seconds ?? raw.seconds;
+    if (typeof s === "number") ms = s * 1000;
+  }
+  return Number.isNaN(ms) ? "" : new Date(ms).toLocaleString();
+}
 
 // Look for podskills under any of the common array keys a skill might carry.
 function getPodskills(skill: any): any[] {
@@ -213,6 +227,34 @@ export function DesignPanel({ g }: { g: GhostData }) {
         </div>
       </div>
       <ResultView k="design" output={output} loading={loading} t={t} />
+
+      {g.decisions.length ? (
+        <div className="history-list">
+          <div className="list-head">
+            <h3>
+              {(t as any).designHistoryTitle || "Design history"} ({g.decisions.length})
+            </h3>
+          </div>
+          <ul className="file-list">
+            {(g.decisions as any[]).map((d) => (
+              <li key={String(d.id)}>
+                <details>
+                  <summary className="file-head">
+                    <b>{String(d.section || (t as any).designGeneral || "General design")}</b>
+                    <span className="muted">{fmtDate(d.createdAt)}</span>
+                  </summary>
+                  <div className="file-body md-scroll">
+                    <Markdown>{String(d.decision || "")}</Markdown>
+                  </div>
+                </details>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : selectedProject && !loading.design ? (
+        <div className="result-box empty">{(t as any).noDesignHistory || "No designs saved yet."}</div>
+      ) : null}
+
       <MapModal open={mapOpen} title={t.mapTitle} onClose={() => setMapOpen(false)} closeLabel={t.closeMap}>
         {mapReady ? (
           <FlowMap
@@ -246,7 +288,7 @@ export function DesignPanel({ g }: { g: GhostData }) {
           ) : dmLoaded && !dmHasMap && dmNodes.length === 0 ? (
             <p className="muted">{(t as any).noDesignMapYet || "No design map yet."}</p>
           ) : (
-            <div className="design-map-shell" style={{ minHeight: 600, height: 600 }}>
+            <div className="design-map-host">
               <DesignMapCanvas
                 nodes={dmNodes}
                 edges={dmEdges}

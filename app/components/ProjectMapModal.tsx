@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { GhostData } from "../useGhostData";
 import type { Json } from "../api";
 import { MapModal } from "./MapModal";
-import { ProjectMap, type ProjectMapData } from "./ProjectMap";
-import { NodeDetailSidebar } from "./NodeDetailSidebar";
+import type { ProjectMapData } from "./ProjectMap";
+import { GhostMap } from "./GhostMap";
 
 export interface ProjectMapModalProps {
   g: GhostData;
@@ -21,7 +21,6 @@ export function ProjectMapModal({ g, projectId, projectName, onClose }: ProjectM
   const [scan, setScan] = useState<Json | null>(null);
   const [map, setMap] = useState<ProjectMapData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -67,25 +66,13 @@ export function ProjectMapModal({ g, projectId, projectName, onClose }: ProjectM
           <span className="spinner" /> {t.loading || "Loading\u2026"}
         </div>
       ) : completed ? (
-        <div className="intel-modal-grid">
-          <ProjectMap
-            data={map!}
-            t={t}
-            projectName={projectName}
-            onSelectNode={setSelectedNodeId}
-            selectedNodeId={selectedNodeId}
-            renderNodeDetail={(nodeId) => (
-              <NodeDetailSidebar
-                projectId={projectId}
-                nodeId={nodeId}
-                loadNodeDetail={g.loadNodeDetail}
-                onClose={() => setSelectedNodeId(null)}
-                onNavigate={setSelectedNodeId}
-                t={t}
-              />
-            )}
-          />
-        </div>
+        <GhostMap
+          data={map!}
+          projectId={projectId}
+          projectName={projectName}
+          t={t}
+          loadNodeDetail={g.loadNodeDetail}
+        />
       ) : status === "failed" ? (
         <div className="intel-state error">
           <p><strong>{t.errorWord || "Error"}:</strong> {String(scan?.error || t.requestFailed || "Scan failed")}</p>

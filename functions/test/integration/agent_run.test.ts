@@ -1,9 +1,12 @@
 /**
- * Integration test — AUTONOMOUS AGENT (Epic 3) against the Firestore emulator.
+ * Integration test — AUTONOMOUS AGENT (Autopilot) against the Firestore emulator.
  *
- * Drives the real `/agent/run` orchestration end-to-end through one call:
- *   POST /login → POST /agent/run (learn → extract-skills → design → plan →
- *   verified build) → GET /agent/runs/:id
+ * Drives the real /agent/run orchestration end-to-end. The route is async (Cloud
+ * Tasks): it only ENQUEUES a job and returns 202 { runId }. Under the emulator
+ * the job dispatches INLINE (see aiJobs.ts), so the whole learn → extract-skills
+ * → design → plan → verified build cycle runs out of band and streams progress
+ * into the `agent_runs` doc. The test polls GET /agent/runs/:id until it reaches
+ * "ready" and then loads the verified build files via GET /builds/:id.
  *
  * Self-skip: gated on `EMULATOR_AVAILABLE` via `describe.skipIf` (shared harness)
  * so the default `npm test` (no emulator) stays green and only the CI emulator
@@ -97,12 +100,16 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: autonomous agent (/agent/run)
     vi.restoreAllMocks();
   });
 
-  function aiBlocked(res: { status: number; body: any }, label: string): boolean {
-    if (res.status === 400 && res.body?.error === "no_api_key") {
-      console.warn(`[agent] '${label}' returned no_api_key — AI seam not mocked; skipping AI-dependent asserts.`);
-      return true;
+  // Poll the (owner-scoped) run doc until it reaches a terminal phase or times out.
+  async function waitForRun(token: string, runId: string): Promise<{ status: number; body: any }> {
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      const got = await srv.request("GET", `/agent/runs/${runId}`, { token });
+      const status = String(got.body?.run?.status || "");
+      if (status === "ready" || status === "error") return got;
+      if (Date.now() > deadline) return got;
+      await new Promise((r) => setTimeout(r, 250));
     }
-    return false;
   }
 
   it("rejects unauthenticated access (401)", async () => {
@@ -128,27 +135,35 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: autonomous agent (/agent/run)
       token,
       body: { urls: ["https://example.com/guide", "https://example.com/guide2"], task: "Build an autonomous agent platform in TypeScript with Firestore" }
     });
-    if (aiBlocked(run, "agent/run")) return;
-
-    expect(run.status).toBe(200);
+    // The route only enqueues: 202 + a run id we can poll.
+    if (run.status === 400 && run.body?.error === "no_api_key") {
+      console.warn("[agent] returned no_api_key — AI seam not mocked; skipping AI-dependent asserts.");
+      return;
+    }
+    expect(run.status).toBe(202);
     expect(typeof run.body.runId).toBe("string");
-    expect(typeof run.body.topicId).toBe("string");
-    expect(typeof run.body.projectId).toBe("string");
-    expect(typeof run.body.buildRunId).toBe("string");
-    expect(Array.isArray(run.body.files)).toBe(true);
-    expect(run.body.files.length).toBeGreaterThanOrEqual(1);
-    // Verification ran without an infra error.
-    expect(run.body.verification).toBeTruthy();
-    expect(run.body.verification.status).not.toBe("error");
-    // Steps recorded the whole pipeline.
-    const stepNames = (run.body.steps as { name: string }[]).map((s) => s.name);
-    expect(stepNames).toEqual(expect.arrayContaining(["learning", "skilling", "designing", "planning", "building"]));
 
-    // GET the run (owner-scoped) and confirm it reached "ready".
-    const got = await srv.request("GET", `/agent/runs/${run.body.runId}`, { token });
+    const got = await waitForRun(token, run.body.runId);
     expect(got.status).toBe(200);
     expect(got.body.run.id).toBe(run.body.runId);
     expect(got.body.run.status).toBe("ready");
+    expect(typeof got.body.run.topicId).toBe("string");
+    expect(typeof got.body.run.projectId).toBe("string");
+    expect(typeof got.body.run.buildRunId).toBe("string");
+
+    // Steps recorded the whole pipeline.
+    const stepNames = (got.body.run.steps as { name: string }[]).map((s) => s.name);
+    expect(stepNames).toEqual(expect.arrayContaining(["learning", "skilling", "designing", "planning", "building"]));
+
+    // Verification ran without an infra error.
+    expect(got.body.run.verification).toBeTruthy();
+    expect(got.body.run.verification.status).not.toBe("error");
+
+    // The verified build produced artifacts, loadable via the build route.
+    const build = await srv.request("GET", `/builds/${got.body.run.buildRunId}`, { token });
+    expect(build.status).toBe(200);
+    expect(Array.isArray(build.body.artifacts)).toBe(true);
+    expect(build.body.artifacts.length).toBeGreaterThanOrEqual(1);
 
     // A different user cannot read this run.
     const other = await seedLoginUser("agent-pw-789");

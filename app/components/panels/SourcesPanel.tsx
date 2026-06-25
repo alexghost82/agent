@@ -15,7 +15,7 @@ function srcType(url: string): { key: "web" | "github"; label: string; icon: str
 }
 
 export function SourcesPanel({ g }: { g: GhostData }) {
-  const { t, topics, sources, selectedTopic, setSelectedTopic, loading, output, query } = g;
+  const { t, topics, sources, selectedTopic, setSelectedTopic, loading, output, query, ingestProgress } = g;
 
   const [newTopicName, setNewTopicName] = useState("");
   const [newTopicDesc, setNewTopicDesc] = useState("");
@@ -109,6 +109,79 @@ export function SourcesPanel({ g }: { g: GhostData }) {
 
       <div className="page-grid">
         <div className="pg-main">
+          {ingestProgress ? (() => {
+            const ip = ingestProgress;
+            const pct = ip.total ? Math.round((ip.done / ip.total) * 100) : 0;
+            const remaining = ip.total - ip.done;
+            const running = !!loading.sources;
+            return (
+              <div className="ingest-progress" role="status" aria-live="polite">
+                <div className="ip-head">
+                  <span className={`ip-title ${running ? "running" : "done"}`}>
+                    <Icon name={running ? "refresh" : "check"} />
+                    {running ? t.trainingProgress : t.trainingDone}
+                  </span>
+                  <span className="ip-pct">{pct}%</span>
+                  {!running && (
+                    <button className="ip-close" onClick={g.clearIngestProgress} aria-label="Dismiss" title="Dismiss">
+                      ×
+                    </button>
+                  )}
+                </div>
+                <div className="ip-track">
+                  <span className="ip-fill" style={{ width: `${pct}%` }} />
+                </div>
+                <div className="ip-meta">
+                  <span>{t.trainingLearned.replace("{a}", String(ip.saved)).replace("{b}", String(ip.total))}</span>
+                  {remaining > 0 ? (
+                    <span className="muted">{t.trainingRemaining.replace("{n}", String(remaining))}</span>
+                  ) : null}
+                  {ip.failed > 0 ? (
+                    <span className="ip-fail-text">
+                      {ip.failed} {t.trainingFailed}
+                    </span>
+                  ) : null}
+                </div>
+                {ip.current ? (
+                  <div className="ip-current">
+                    <span className="ip-spin" />
+                    <span className="ip-current-lbl">{t.trainingCurrent}:</span>
+                    <span className="ip-url">{ip.current}</span>
+                  </div>
+                ) : null}
+                <ul className="ip-list">
+                  {ip.items.map((it, i) => (
+                    <li key={`${it.url}-${i}`} className={`ip-item ip-${it.status}`}>
+                      <span className="ip-ic">
+                        {it.status === "done" ? (
+                          <Icon name="check" />
+                        ) : it.status === "learning" ? (
+                          <Icon name="refresh" />
+                        ) : it.status === "failed" ? (
+                          <span className="ip-x">×</span>
+                        ) : (
+                          <span className="ip-dot" />
+                        )}
+                      </span>
+                      <span className="ip-item-url">{it.url}</span>
+                      {it.status === "done" && it.chunks != null ? (
+                        <span className="ip-chunks">
+                          {it.chunks} {t.chunksUnit}
+                        </span>
+                      ) : it.status === "learning" ? (
+                        <span className="ip-state">{t.learning}</span>
+                      ) : it.status === "pending" ? (
+                        <span className="ip-state muted">{t.trainingPending}</span>
+                      ) : it.status === "failed" ? (
+                        <span className="ip-state ip-fail-text">{it.error || t.trainingFailed}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })() : null}
+
           {!topics.length ? (
             <p className="muted">{t.noTopics}</p>
           ) : !selectedTopic ? (

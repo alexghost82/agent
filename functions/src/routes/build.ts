@@ -1,19 +1,15 @@
 import { Router, Response } from "express";
 import { db } from "../firebase";
-import { serverTime, logEvent } from "../util";
 import { rateLimit } from "../ratelimit";
 import { distributedRateLimit } from "../security";
 import { AuthedRequest } from "../auth";
 import { listScoped } from "../listing";
 import { sendError, notFound } from "../errors";
 import { BuildSchema } from "../schemas";
-import { runVerifiedBuild } from "../build";
-import { recordOutcome } from "../learn";
-import { recordUsage } from "../usage";
+import { assertAiKeyAvailable } from "../ai";
+import { createAiJob, enqueueAiJob } from "../aiJobs";
 
 export const buildRouter = Router();
-
-const ARTIFACT_WRITE_BATCH = 400;
 
 // List build runs for the caller (optionally narrowed to one project).
 buildRouter.get("/builds", async (req: AuthedRequest, res: Response) => {
@@ -54,6 +50,13 @@ buildRouter.get("/builds/:id", async (req: AuthedRequest, res: Response) => {
 
 // Real-development BUILD: generates real project files from the plan + skills +
 // memory into an isolated Firestore workspace. NEVER writes to GitHub.
+//
+// Generation is LLM-bound (plus verification + an optional auto-fix pass) and
+// routinely exceeds Firebase Hosting's 60s rewrite timeout, so this only
+// validates + ENQUEUES an async job (see aiJobs.ts / buildJob.ts) and returns
+// 202 with a jobId. The job's `result.id` is the build_run id; the client polls
+// GET /ai-jobs/:id and then loads files via GET /builds/:id. Ownership + plan
+// ownership + key checks stay synchronous for immediate 400/404 on bad input.
 buildRouter.post(
   "/projects/:id/build",
   rateLimit("build", 6, 60_000),
@@ -68,107 +71,25 @@ buildRouter.post(
         sendError(req, res, notFound());
         return;
       }
-      const project = projDoc.data()!;
 
       // Optional source plan must be owned by the caller.
-      let plan: { files?: { path: string; content: string }[]; prompts?: { title?: string; content: string }[] } | null = null;
       if (planId) {
         const planDoc = await db.collection("generated_plans").doc(planId).get();
         if (!planDoc.exists || planDoc.data()?.userId !== req.userId) {
           sendError(req, res, notFound());
           return;
         }
-        const pd = planDoc.data()!;
-        plan = { files: pd.files, prompts: pd.prompts };
       }
 
-      // Create the run record up-front so the work is observable even if the
-      // generation call fails midway.
-      const runRef = await db.collection("build_runs").add({
-        userId: req.userId,
+      await assertAiKeyAvailable(req.userId!);
+      const jobId = await createAiJob({
+        userId: req.userId!,
+        kind: "build",
         projectId,
-        projectName: project.name,
-        planId: planId || null,
-        instructions: instructions || null,
-        status: "running",
-        fileCount: 0,
-        summary: "",
-        errorCode: null,
-        createdAt: serverTime(),
-        updatedAt: serverTime()
+        params: { planId: planId ?? null, instructions: instructions ?? null, lang: lang ?? null }
       });
-
-      try {
-        // Generate → verify → (optional) ONE auto-fix pass, keeping the better
-        // attempt (Epic 4.2). Static checks by default; the real toolchain runs
-        // only on an isolated runner with BUILD_EXEC_ENABLED. Never executes
-        // untrusted code on the shared api process or writes to any git remote.
-        const result = await runVerifiedBuild(runRef.id, {
-          userId: req.userId!,
-          projectId,
-          project: {
-            name: project.name,
-            description: project.description,
-            stack: project.stack,
-            summary: project.summary,
-            skillIds: project.skillIds || []
-          },
-          plan,
-          instructions,
-          lang
-        });
-        const verification = result.verification;
-
-        // Persist each FINAL generated file as an owned artifact.
-        for (let i = 0; i < result.files.length; i += ARTIFACT_WRITE_BATCH) {
-          const slice = result.files.slice(i, i + ARTIFACT_WRITE_BATCH);
-          const batch = db.batch();
-          slice.forEach((f) => {
-            const ref = db.collection("build_artifacts").doc();
-            batch.set(ref, {
-              userId: req.userId,
-              buildRunId: runRef.id,
-              projectId,
-              path: f.path,
-              content: f.content,
-              language: f.language,
-              bytes: f.bytes,
-              createdAt: serverTime()
-            });
-          });
-          await batch.commit();
-        }
-
-        await runRef.update({
-          status: "ready",
-          fileCount: result.files.length,
-          summary: result.summary,
-          verification,
-          autofixed: result.autofixed,
-          updatedAt: serverTime()
-        });
-        // Self-learning (CONTRACT v3.4): feed the build outcome back into memory.
-        await recordOutcome({
-          userId: req.userId!,
-          projectId,
-          kind: "build_outcome",
-          title: `Build: ${project.name}`,
-          content: `${result.summary}\n\nFiles:\n${result.files.map((f) => `- ${f.path}`).join("\n")}`
-        });
-        await recordUsage(req.userId!, "build");
-        await logEvent(req.userId!, "build_completed", project.name, {
-          projectId,
-          buildRunId: runRef.id,
-          files: result.files.length
-        });
-        res.json({ id: runRef.id, status: "ready", files: result.files, summary: result.summary, fileCount: result.files.length, verification, autofixed: result.autofixed });
-      } catch (genErr) {
-        // Mark the run as errored with a stable-ish code, then surface via the
-        // shared error envelope (§1).
-        const code = genErr instanceof Error && genErr.message === "no_api_key" ? "no_api_key" : "internal";
-        await runRef.update({ status: "error", errorCode: code, updatedAt: serverTime() }).catch(() => undefined);
-        throw genErr;
-      }
+      await enqueueAiJob(jobId);
+      res.status(202).json({ jobId, status: "queued" });
     } catch (err) {
       sendError(req, res, err);
     }

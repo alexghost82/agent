@@ -39,9 +39,9 @@ import { askRouter } from "../../src/routes/ask";
 import { designRouter } from "../../src/routes/design";
 import { designMapRouter } from "../../src/routes/designMap";
 import { plansRouter } from "../../src/routes/plans";
+import { aiJobsRouter } from "../../src/routes/aiJobs";
 import { dashboardRouter } from "../../src/routes/dashboard";
 import { keysRouter } from "../../src/routes/keys";
-import { agentRouter } from "../../src/routes/agent";
 
 export const EMULATOR_AVAILABLE = !!process.env.FIRESTORE_EMULATOR_HOST;
 
@@ -96,9 +96,9 @@ export function buildApp(): express.Express {
   app.use(designRouter);
   app.use(designMapRouter);
   app.use(plansRouter);
+  app.use(aiJobsRouter);
   app.use(dashboardRouter);
   app.use(keysRouter);
-  app.use(agentRouter);
 
   app.use((req: AuthedRequest, res: Response) => sendError(req, res, notFound()));
   app.use((err: unknown, req: AuthedRequest, res: Response, _next: NextFunction) =>

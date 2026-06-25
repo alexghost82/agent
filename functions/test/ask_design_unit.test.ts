@@ -66,6 +66,7 @@ vi.mock("../src/firebase", () => {
 
 import { askRouter } from "../src/routes/ask";
 import { designRouter } from "../src/routes/design";
+import { runDesignCore } from "../src/designCore";
 
 let server: http.Server;
 let baseUrl: string;
@@ -132,13 +133,16 @@ describe("ask router — happy path", () => {
   });
 });
 
-describe("design router — happy path", () => {
+// The POST /design route is now async (validate + enqueue a Cloud Tasks job).
+// The actual generation logic lives in `runDesignCore` (run by the worker), so
+// the success-branch coverage exercises that core directly with the same mocked
+// collaborators. The GET listing stays on the real router.
+describe("design core — happy path", () => {
   it("generates a design, persists it, feeds the outcome back, and responds", async () => {
-    const res = await request("POST", "/design", { projectId: "proj-123", section: "billing" });
-    expect(res.status).toBe(200);
-    expect(res.body.id).toBe("dec1");
-    expect(res.body.plan).toBe("CANNED ANSWER");
-    expect(res.body.sources).toHaveLength(1);
+    const r = await runDesignCore({ userId: "u1", projectId: "proj-123", section: "billing" });
+    expect(r.id).toBe("dec1");
+    expect(r.plan).toBe("CANNED ANSWER");
+    expect(r.sources).toHaveLength(1);
 
     expect(memory.gatherContext).toHaveBeenCalled();
     expect(ai.generateAnswer).toHaveBeenCalledTimes(1);
@@ -153,11 +157,10 @@ describe("design router — happy path", () => {
     memory.gatherContext
       .mockResolvedValueOnce([]) // project-scoped: empty
       .mockResolvedValueOnce([{ id: "c2", content: "global", score: 0.5 }]); // fallback
-    const res = await request("POST", "/design", { projectId: "proj-123" });
-    expect(res.status).toBe(200);
+    const r = await runDesignCore({ userId: "u1", projectId: "proj-123" });
     // Two gatherContext calls: scoped (empty) then the user-wide fallback.
     expect(memory.gatherContext).toHaveBeenCalledTimes(2);
-    expect(res.body.sources[0].id).toBe("c2");
+    expect((r.sources[0] as { id?: string }).id).toBe("c2");
   });
 
   it("folds the project's selected skills into the prompt", async () => {
@@ -169,8 +172,7 @@ describe("design router — happy path", () => {
       summary: null,
       skillIds: ["s1"]
     };
-    const res = await request("POST", "/design", { projectId: "proj-123" });
-    expect(res.status).toBe(200);
+    await runDesignCore({ userId: "u1", projectId: "proj-123" });
     // The generated prompt includes the selected-skills section.
     const prompt = ai.generateAnswer.mock.calls[0][0] as string;
     expect(prompt).toContain("ВЫБРАННЫЕ НАВЫКИ АГЕНТА");
@@ -186,8 +188,7 @@ describe("design router — happy path", () => {
       summary: "existing code summary from GitHub",
       skillIds: []
     };
-    const res = await request("POST", "/design", { projectId: "proj-123" });
-    expect(res.status).toBe(200);
+    await runDesignCore({ userId: "u1", projectId: "proj-123" });
     const prompt = ai.generateAnswer.mock.calls[0][0] as string;
     // Brownfield phrasing (not the greenfield "с нуля" basis).
     expect(prompt).toContain("existing code summary from GitHub");
@@ -195,11 +196,7 @@ describe("design router — happy path", () => {
   });
 
   it("includes skills resolved from the selected topic categories", async () => {
-    const res = await request("POST", "/design", {
-      projectId: "proj-123",
-      topicIds: ["topic-a"]
-    });
-    expect(res.status).toBe(200);
+    await runDesignCore({ userId: "u1", projectId: "proj-123", topicIds: ["topic-a"] });
     const prompt = ai.generateAnswer.mock.calls[0][0] as string;
     // The topic-scoped skill (skillName "T") was folded into the prompt.
     expect(prompt).toContain("- T: d");

@@ -83,6 +83,20 @@ export const SkillSchema = z.object({
   template: z.string().max(EXAMPLE_MAX).optional()
 });
 
+// Partial update of an owned skill (PATCH /skills/:id). Every field is optional
+// (so callers can patch just the name/description) but at least one must be
+// present. `example`/`template` accept null to clear them. Mirrors the bounds of
+// SkillSchema so an edited skill stays within the same storage/cost limits.
+export const SkillUpdateSchema = z
+  .object({
+    skillName: z.string().min(2).max(NAME_MAX).optional(),
+    description: z.string().min(5).max(DESC_MAX).optional(),
+    example: z.string().max(EXAMPLE_MAX).nullable().optional(),
+    appliesTo: tags.optional(),
+    template: z.string().max(EXAMPLE_MAX).nullable().optional()
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "no fields to update" });
+
 export const AskSchema = z.object({
   question: z.string().min(3).max(QUESTION_MAX),
   limit: z.number().int().min(1).max(50).optional(),
@@ -150,9 +164,10 @@ export const BuildSchema = z.object({
   lang: replyLang
 });
 
-// Autonomous agent run (Epic 3): one call drives links + a task through the
+// Autonomous agent run (Autopilot): one call drives links + a task through the
 // whole cycle (learn → skills → design → plan → verified build). `urls` is
-// bounded (>=1, capped) and `task` reuses the generous idea bound.
+// bounded (>=1, capped) and `task` reuses the generous idea bound. The heavy
+// orchestration runs as an async AI job; the route only validates + enqueues.
 const AGENT_URLS_MAX = 20;
 export const AgentRunSchema = z.object({
   urls: z.array(z.string().url().max(URL_MAX)).min(1).max(AGENT_URLS_MAX),

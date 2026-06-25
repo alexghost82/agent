@@ -162,30 +162,6 @@ final class RequestParityTests: XCTestCase {
         XCTAssertEqual(req.accept, "application/json")
     }
 
-    func testAgentRunBuildsAuthedPostWithFullBody() async throws {
-        respond(suffix: "/agent/run", fixture: "agent-run.response.json")
-        _ = try await makeClient().agentRun(urls: ["https://a.dev"], task: "do it", deep: true, lang: "ru", token: "tokA")
-        let req = try XCTUnwrap(captured("/agent/run"))
-        XCTAssertEqual(req.method, "POST")
-        XCTAssertEqual(req.authorization, "Bearer tokA")
-        XCTAssertTrue(req.url.path.hasSuffix("/api/agent/run"))
-        XCTAssertEqual(bodyKeys(forPathSuffix: "/agent/run"), ["urls", "task", "deep", "lang"])
-        // Body values are well-formed JSON of the expected types.
-        let obj = try JSONSerialization.jsonObject(with: XCTUnwrap(req.body)) as? [String: Any]
-        XCTAssertEqual(obj?["urls"] as? [String], ["https://a.dev"])
-        XCTAssertEqual(obj?["task"] as? String, "do it")
-        XCTAssertEqual(obj?["deep"] as? Bool, true)
-        XCTAssertEqual(obj?["lang"] as? String, "ru")
-    }
-
-    func testAgentRunStatusEncodesRunIdInPath() async throws {
-        respond(suffix: "/agent/runs/run_7", fixture: "agent-run-status.response.json")
-        _ = try await makeClient().agentRunStatus(id: "run_7", token: "tokS")
-        let req = try XCTUnwrap(captured("/agent/runs/run_7"))
-        XCTAssertEqual(req.method, "GET")
-        XCTAssertEqual(req.authorization, "Bearer tokS")
-        XCTAssertTrue(req.url.path.hasSuffix("/api/agent/runs/run_7"))
-    }
 }
 
 // MARK: - Response decoding parity (real models vs recorded fixtures)
@@ -226,35 +202,6 @@ final class ResponseParityTests: XCTestCase {
         XCTAssertNil(res.projects.last?.repoUrl)
     }
 
-    func testAgentRunResultDecodesFromFixture() async throws {
-        respond(suffix: "/agent/run", fixture: "agent-run.response.json")
-        let res = try await makeClient().agentRun(urls: ["https://a.dev"], task: "t", deep: false, lang: "en", token: "tok")
-        XCTAssertEqual(res.runId, "run_42")
-        XCTAssertEqual(res.topicId, "t_1")
-        XCTAssertEqual(res.files.count, 2)
-        XCTAssertEqual(res.files.first?.path, "README.md")
-        XCTAssertNil(res.files.last?.language, "optional file metadata may be absent")
-        XCTAssertEqual(res.steps.count, 5)
-        XCTAssertEqual(res.steps.first?.name, "learning")
-    }
-
-    func testAgentRunStatusEnvelopeDecodesFromFixture() async throws {
-        respond(suffix: "/agent/runs/run_7", fixture: "agent-run-status.response.json")
-        let run = try await makeClient().agentRunStatus(id: "run_7", token: "tok")
-        XCTAssertEqual(run.id, "run_7")
-        XCTAssertEqual(run.status, "building")
-        XCTAssertNil(run.buildRunId, "Firestore null + timestamp objects must not break decoding")
-        XCTAssertEqual(run.steps.count, 2)
-    }
-
-    func testAgentRunsListDecodesFromFixture() async throws {
-        respond(suffix: "/agent/runs", fixture: "agent-runs.response.json")
-        let runs = try await makeClient().agentRuns(token: "tok")
-        XCTAssertEqual(runs.count, 2)
-        XCTAssertEqual(runs.first?.id, "r1")
-        XCTAssertEqual(runs.last?.errorCode, "no_api_key")
-    }
-
     /// The app's supported dashboard path is the raw `JSONValue` tree (AppModel
     /// reads `stats.counts[<key>]`). Verify the backend's real counter keys are
     /// present and decodable that way.
@@ -289,9 +236,9 @@ final class ErrorParityTests: XCTestCase {
     }
 
     func testRateLimitedMapsToServerErrorWithRequestId() async {
-        respond(suffix: "/agent/run", status: 429, fixture: "error.rate_limited.json")
+        respond(suffix: "/projects", status: 429, fixture: "error.rate_limited.json")
         do {
-            _ = try await makeClient().agentRun(urls: ["https://a.dev"], task: "t", deep: false, lang: "en", token: "tok")
+            _ = try await makeClient().projects(token: "tok")
             XCTFail("expected APIClientError.server")
         } catch let APIClientError.server(code, requestId, status) {
             XCTAssertEqual(code, "rate_limited")

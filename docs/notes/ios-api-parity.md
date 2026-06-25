@@ -34,9 +34,6 @@ HTTP header names are case-insensitive, so the iOS lowercase header names
 | `/logout` | POST | bearer | _(no body)_ | `{ ok: true }` (ignored) | `EmptyResponse` | `routes/session.ts` |
 | `/dashboard` | GET | bearer | — | `counts{…}`, `recentLogs[]` | `DashboardResponse` (typed, **unused**) / raw `JSONValue` (used) | `routes/dashboard.ts`, `stats.ts` |
 | `/projects` | GET | bearer | — | `projects[]{ id, name, description?, stack?, repoUrl? }` | `ProjectsResponse`/`ProjectSummary` | `routes/projects.ts`, `listing.ts` |
-| `/agent/run` | POST | bearer | `urls[]`, `task`, `deep`, `lang` → `AgentRunSchema` | `runId`, `topicId?`, `projectId?`, `buildRunId?`, `files[]{ path, content, language?, bytes? }`, `summary`, `steps[]{ name, status, detail? }` (`verification` ignored) | `AgentRunResult`/`BuildFileDTO`/`AgentStep` | `routes/agent.ts` |
-| `/agent/runs/:id` | GET | bearer | _(id in path)_ | `run{ id, status, steps[], … }` | `AgentRunEnvelope` → `AgentRun` | `routes/agent.ts` |
-| `/agent/runs` | GET | bearer | — | `runs[]{ id, … }` | `AgentRunsEnvelope` → `[AgentRun]` | `routes/agent.ts`, `listing.ts` |
 
 ## Parity matrix — raw-JSON endpoints (decoded into `JSONValue`, read by `AppModel`)
 
@@ -105,9 +102,8 @@ against `schemas.ts`.
    backend (verified), but the dashboard typed model has diverged (findings 1–2).
    **Follow-up:** standardize on one strategy to prevent silent drift.
 
-5. **Intentional, non-defect omissions.** `AgentRunResult`/`AgentRun` ignore the
-   `verification` block and extra run fields; `EmptyResponse` ignores the
-   `{ ok: true }` logout body. These are forward-compatible and fine.
+5. **Intentional, non-defect omissions.** `EmptyResponse` ignores the
+   `{ ok: true }` logout body. This is forward-compatible and fine.
 
 ## How to run
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Json,
+  ApiError,
   errorPayload,
   getJson,
   postJson,
@@ -14,6 +15,23 @@ import {
 import { DICT, type Lang, type Theme, type StepKey } from "./i18n";
 
 export type Auth = { username: string; token: string };
+
+// Live training/ingest progress surfaced in the Sources panel.
+export type IngestItemStatus = "pending" | "learning" | "done" | "failed";
+export interface IngestProgressItem {
+  url: string;
+  status: IngestItemStatus;
+  chunks?: number;
+  error?: string;
+}
+export interface IngestProgress {
+  total: number;
+  done: number;
+  saved: number;
+  failed: number;
+  current: string | null;
+  items: IngestProgressItem[];
+}
 
 export function useGhostData() {
   const [lang, setLang] = useState<Lang>("en");
@@ -30,10 +48,14 @@ export function useGhostData() {
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [output, setOutput] = useState<Record<string, Json | null>>({});
 
-  // Live phase of the in-flight autopilot run (polled from agent_runs while the
-  // blocking /agent/run call is still resolving), so the UI shows real progress.
+  // Live phase of the in-flight autopilot run, polled from `agent_runs` while the
+  // async /agent/run job executes, so the UI shows real progress (status + steps).
   const [agentRun, setAgentRun] = useState<Json | null>(null);
-  const agentBaselineRef = useRef<string | null>(null);
+
+  // Live ingest/training progress for the Sources panel: per-URL status plus an
+  // overall percentage, so the user sees which resource is being learned, how
+  // many are done and how many remain. null when nothing is running/finished.
+  const [ingestProgress, setIngestProgress] = useState<IngestProgress | null>(null);
 
   const [query, setQuery] = useState("");
   const [stats, setStats] = useState<Json | null>(null);
@@ -43,6 +65,9 @@ export function useGhostData() {
   const [projects, setProjects] = useState<Json[]>([]);
   const [plans, setPlans] = useState<Json[]>([]);
   const [builds, setBuilds] = useState<Json[]>([]);
+  // Saved design decisions for the selected project (the "Design platform"
+  // history). Loaded from GET /design?projectId=… so past designs persist.
+  const [decisions, setDecisions] = useState<Json[]>([]);
 
   const [selectedTopic, setSelectedTopic] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
@@ -120,6 +145,9 @@ export function useGhostData() {
     setSelectedTopic("");
     setSelectedProject("");
     setSelectedSkillIds([]);
+    setDecisions([]);
+    setAgentRun(null);
+    setIngestProgress(null);
   }, []);
 
   /* ---------------- run wrapper ---------------- */
@@ -200,6 +228,17 @@ export function useGhostData() {
       /* */
     }
   }, []);
+  const loadDecisions = useCallback(async (projectId: string) => {
+    if (!projectId) {
+      setDecisions([]);
+      return;
+    }
+    try {
+      setDecisions((await getJson(`/design?projectId=${encodeURIComponent(projectId)}`)).decisions || []);
+    } catch {
+      /* */
+    }
+  }, []);
 
   const refreshAll = useCallback(() => {
     loadDashboard();
@@ -217,7 +256,10 @@ export function useGhostData() {
 
   useEffect(() => {
     if (!auth) return;
-    if (active === "overview") loadDashboard();
+    if (active === "overview") {
+      loadDashboard();
+      loadProjects();
+    }
     if (active === "sources") loadTopics();
     if (active === "skills") {
       loadTopics();
@@ -228,6 +270,10 @@ export function useGhostData() {
       loadSkills();
     }
     if (active === "design" || active === "plan" || active === "build") loadProjects();
+    if (active === "agents") {
+      loadDashboard();
+      loadProjects();
+    }
   }, [active, auth, loadDashboard, loadTopics, loadSkills, loadProjects]);
 
   useEffect(() => {
@@ -237,9 +283,10 @@ export function useGhostData() {
   useEffect(() => {
     loadPlans(selectedProject);
     loadBuilds(selectedProject);
+    loadDecisions(selectedProject);
     const p = projects.find((x) => String(x.id) === selectedProject);
     setSelectedSkillIds(Array.isArray(p?.skillIds) ? (p!.skillIds as string[]) : []);
-  }, [selectedProject, projects, loadPlans, loadBuilds]);
+  }, [selectedProject, projects, loadPlans, loadBuilds, loadDecisions]);
 
   /* ---------------- ingest + scan progress polling ---------------- */
   const ingesting = useMemo(
@@ -273,35 +320,6 @@ export function useGhostData() {
     };
   }, [auth, ingesting, scanning, loadProjects, loadDashboard]);
 
-  /* ---------------- live agent-run progress polling ---------------- */
-  // While /agent/run is in flight, poll the run list and lock onto the newest
-  // run that did not exist before we started (vs. the captured baseline). The
-  // server streams real phase transitions into that doc (status + steps).
-  useEffect(() => {
-    if (!auth || !loading.agent) {
-      setAgentRun(null);
-      return;
-    }
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await getJson("/agent/runs");
-        const runs = (r.runs || []) as Json[];
-        const newest = runs[0] || null;
-        const live = newest && String(newest.id) !== agentBaselineRef.current ? newest : null;
-        if (!cancelled) setAgentRun(live);
-      } catch {
-        /* polling is best-effort */
-      }
-    };
-    tick();
-    const iv = setInterval(tick, 1500);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
-  }, [auth, loading.agent]);
-
   /* ---------------- topic / source actions ---------------- */
   const createTopic = useCallback(
     async (name: string, description: string) => {
@@ -317,18 +335,48 @@ export function useGhostData() {
     [loadTopics, loadDashboard]
   );
 
+  const clearIngestProgress = useCallback(() => setIngestProgress(null), []);
+
   const addSource = useCallback(
     async (topicId: string, url: string, tags: string[], deep = false) =>
       run("sources", async () => {
-        const r = await postJson("/learn", {
-          topicId,
-          url: url.trim(),
-          tags: tags.length ? tags : undefined,
-          deep: deep || undefined
+        const u = url.trim();
+        setIngestProgress({
+          total: 1,
+          done: 0,
+          saved: 0,
+          failed: 0,
+          current: u,
+          items: [{ url: u, status: "learning" }]
         });
-        loadSources(topicId);
-        loadDashboard();
-        return r;
+        try {
+          const r = await postJson("/learn", {
+            topicId,
+            url: u,
+            tags: tags.length ? tags : undefined,
+            deep: deep || undefined
+          });
+          setIngestProgress((p) =>
+            p
+              ? {
+                  ...p,
+                  done: 1,
+                  saved: 1,
+                  current: null,
+                  items: [{ url: u, status: "done", chunks: Number((r as Json)?.chunks ?? 0) }]
+                }
+              : p
+          );
+          loadSources(topicId);
+          loadDashboard();
+          return r;
+        } catch (e: unknown) {
+          const error = errorPayload(e).error;
+          setIngestProgress((p) =>
+            p ? { ...p, done: 1, failed: 1, current: null, items: [{ url: u, status: "failed", error }] } : p
+          );
+          throw e;
+        }
       }),
     [run, loadSources, loadDashboard]
   );
@@ -336,16 +384,34 @@ export function useGhostData() {
   // Batch add: learn several resource URLs in one action by calling the existing
   // /learn endpoint per URL (sequentially, to respect rate limits). Each URL is
   // independent — a failing one does not abort the rest; per-URL results are
-  // returned for display. The single-URL path keeps using addSource above.
+  // returned for display. Live per-URL progress drives `ingestProgress` so the
+  // panel can show a percentage bar and which resource is currently learning.
   const addSources = useCallback(
     async (topicId: string, urls: string[], tags: string[], deep = false) =>
       run("sources", async () => {
+        const clean = urls.map((u) => u.trim()).filter(Boolean);
+        setIngestProgress({
+          total: clean.length,
+          done: 0,
+          saved: 0,
+          failed: 0,
+          current: null,
+          items: clean.map((u) => ({ url: u, status: "pending" as IngestItemStatus }))
+        });
         const results: Json[] = [];
         let saved = 0;
         let failed = 0;
-        for (const raw of urls) {
-          const url = raw.trim();
-          if (!url) continue;
+        for (let i = 0; i < clean.length; i++) {
+          const url = clean[i];
+          setIngestProgress((p) =>
+            p
+              ? {
+                  ...p,
+                  current: url,
+                  items: p.items.map((it, idx) => (idx === i ? { ...it, status: "learning" } : it))
+                }
+              : p
+          );
           try {
             const r = await postJson("/learn", {
               topicId,
@@ -355,9 +421,33 @@ export function useGhostData() {
             });
             saved += 1;
             results.push({ url, ok: true, ...r });
+            const chunks = Number((r as Json)?.chunks ?? 0);
+            setIngestProgress((p) =>
+              p
+                ? {
+                    ...p,
+                    done: p.done + 1,
+                    saved: p.saved + 1,
+                    current: null,
+                    items: p.items.map((it, idx) => (idx === i ? { ...it, status: "done", chunks } : it))
+                  }
+                : p
+            );
           } catch (e: unknown) {
             failed += 1;
-            results.push({ url, ok: false, error: errorPayload(e).error });
+            const error = errorPayload(e).error;
+            results.push({ url, ok: false, error });
+            setIngestProgress((p) =>
+              p
+                ? {
+                    ...p,
+                    done: p.done + 1,
+                    failed: p.failed + 1,
+                    current: null,
+                    items: p.items.map((it, idx) => (idx === i ? { ...it, status: "failed", error } : it))
+                  }
+                : p
+            );
           }
         }
         loadSources(topicId);
@@ -407,16 +497,41 @@ export function useGhostData() {
     [run, loadSources, loadDashboard, selectedTopic]
   );
 
+  /* ---------------- async AI job polling ---------------- */
+  // Plan / build / design / skills are async on the server (Cloud Tasks): the
+  // POST only enqueues a job and returns { jobId } so it never hits Firebase
+  // Hosting's 60s rewrite timeout. We poll the job here until it finishes; the
+  // surrounding `run(...)` keeps the panel in its loading state for the whole
+  // wait, so no panel changes are needed.
+  const pollAiJob = useCallback(async (jobId: string): Promise<Json> => {
+    const deadline = Date.now() + 12 * 60 * 1000; // generous cap (~12 min)
+    for (;;) {
+      const j = await getJson(`/ai-jobs/${encodeURIComponent(jobId)}`);
+      const status = String(j?.status || "");
+      if (status === "done") return (j?.result as Json) || {};
+      if (status === "error") throw new ApiError(400, String(j?.errorCode || "internal"));
+      if (Date.now() > deadline) throw new ApiError(504, "internal");
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+  }, []);
+
   /* ---------------- skill actions ---------------- */
+  // Skill extraction fans out across several batched LLM calls and routinely
+  // exceeds Firebase Hosting's 60s rewrite timeout, so the server now only
+  // enqueues a job and returns { jobId }. We poll it to completion (mirroring
+  // plan/design/build) instead of letting the rewrite time out — which used to
+  // surface a spurious "server error" even though skills were saved in the
+  // background (they only showed up after a manual reload).
   const extractSkills = useCallback(
     async (topicId: string) =>
       run("skills", async () => {
-        const r = await postJson("/extract-skills", { topicId });
+        const { jobId } = await postJson("/extract-skills", { topicId });
+        const r = await pollAiJob(String(jobId));
         loadSkills();
         loadDashboard();
         return r;
       }),
-    [run, loadSkills, loadDashboard]
+    [run, pollAiJob, loadSkills, loadDashboard]
   );
 
   const deleteSkill = useCallback(
@@ -511,45 +626,72 @@ export function useGhostData() {
 
   const design = useCallback(
     async (projectId: string, section: string, topicIds?: string[]) =>
-      run("design", () =>
-        postJson("/design", {
+      run("design", async () => {
+        const { jobId } = await postJson("/design", {
           projectId,
           section: section.trim() || undefined,
           topicIds: topicIds && topicIds.length ? topicIds : undefined,
           lang
-        })
-      ),
-    [run, lang]
+        });
+        const r = await pollAiJob(String(jobId));
+        // Persist into the Design history list and refresh KPIs.
+        loadDecisions(projectId);
+        loadDashboard();
+        return r;
+      }),
+    [run, pollAiJob, lang, loadDecisions, loadDashboard]
   );
 
   const generatePlan = useCallback(
     async (projectId: string, instructions: string) =>
       run("plan", async () => {
-        const r = await postJson("/generate-plan", {
+        const { jobId } = await postJson("/generate-plan", {
           projectId,
           instructions: instructions.trim() || undefined,
           lang
         });
+        const r = await pollAiJob(String(jobId));
         loadPlans(projectId);
         loadDashboard();
         return r;
       }),
-    [run, loadPlans, loadDashboard, lang]
+    [run, pollAiJob, loadPlans, loadDashboard, lang]
   );
 
   const build = useCallback(
     async (projectId: string, planId: string, instructions: string) =>
       run("build", async () => {
-        const r = await postJson(`/projects/${projectId}/build`, {
+        const { jobId } = await postJson(`/projects/${projectId}/build`, {
           planId: planId || undefined,
           instructions: instructions.trim() || undefined,
           lang
         });
+        // The build job result is compact (no inlined files, to stay under
+        // Firestore's 1 MB doc limit); load the full run + artifacts so the
+        // panel can render/zip the generated files.
+        const res = await pollAiJob(String(jobId));
+        let files: Json[] = [];
+        let summary = String(res?.summary || "");
+        let verification = res?.verification;
+        const runId = String(res?.id || "");
+        if (runId) {
+          try {
+            const full = await getJson(`/builds/${encodeURIComponent(runId)}`);
+            const artifacts = Array.isArray(full?.artifacts) ? (full.artifacts as Json[]) : [];
+            files = artifacts.map((a) => ({ path: String(a.path), content: String(a.content) }));
+            if (full?.run) {
+              summary = String((full.run as Json)?.summary ?? summary);
+              verification = (full.run as Json)?.verification ?? verification;
+            }
+          } catch {
+            /* fall back to the compact job result if the fetch fails */
+          }
+        }
         loadBuilds(projectId);
         loadDashboard();
-        return r;
+        return { id: runId, status: "ready", files, summary, verification };
       }),
-    [run, loadBuilds, loadDashboard, lang]
+    [run, pollAiJob, loadBuilds, loadDashboard, lang]
   );
 
   const openBuild = useCallback(
@@ -557,33 +699,75 @@ export function useGhostData() {
     [run]
   );
 
-  /* ---------------- autonomous agent (Epic 3) ---------------- */
+  /* ---------------- autonomous agent (Autopilot) ---------------- */
+  // /agent/run is async on the server (Cloud Tasks): the POST only enqueues and
+  // returns { runId }, and the heavy learn → skills → design → plan → verified
+  // build cycle runs out of band so it never hits Firebase Hosting's 60s rewrite
+  // timeout. We poll the run doc for live progress (status + steps) until it
+  // finishes, then load the verified build files so the panel can render/zip
+  // them. The surrounding `run("agent", …)` keeps the panel in its loading state
+  // (and `agentRun` drives the live stepper) for the whole wait.
   const runAgent = useCallback(
     async (urls: string[], task: string, deep: boolean) =>
       run("agent", async () => {
         const cleanUrls = urls.map((u) => u.trim()).filter(Boolean);
-        // Remember the newest existing run so the poller can identify the new one.
-        try {
-          const existing = await getJson("/agent/runs");
-          const top = (existing.runs as Json[] | undefined)?.[0];
-          agentBaselineRef.current = top?.id ? String(top.id) : null;
-        } catch {
-          agentBaselineRef.current = null;
-        }
         setAgentRun(null);
-        const r = await postJson("/agent/run", {
+        const { runId } = await postJson("/agent/run", {
           urls: cleanUrls,
           task: task.trim(),
           deep: deep || undefined,
           lang
         });
+        const id = String(runId);
+
+        // Poll the run doc until it reaches a terminal phase.
+        const deadline = Date.now() + 15 * 60 * 1000; // generous cap (~15 min)
+        let runDoc: Json = {};
+        for (;;) {
+          try {
+            const r = await getJson(`/agent/runs/${encodeURIComponent(id)}`);
+            runDoc = (r.run as Json) || {};
+            setAgentRun(runDoc);
+          } catch {
+            /* polling is best-effort */
+          }
+          const status = String(runDoc?.status || "");
+          if (status === "ready") break;
+          if (status === "error") throw new ApiError(400, String(runDoc?.errorCode || "internal"));
+          if (Date.now() > deadline) throw new ApiError(504, "internal");
+          await new Promise((r2) => setTimeout(r2, 2000));
+        }
+
+        // Load the verified build files (kept out of the run doc to stay under
+        // Firestore's 1 MB limit) for display/zip.
+        let files: Json[] = [];
+        const buildRunId = String(runDoc?.buildRunId || "");
+        if (buildRunId) {
+          try {
+            const full = await getJson(`/builds/${encodeURIComponent(buildRunId)}`);
+            const artifacts = Array.isArray(full?.artifacts) ? (full.artifacts as Json[]) : [];
+            files = artifacts.map((a) => ({ path: String(a.path), content: String(a.content) }));
+          } catch {
+            /* fall back to no inlined files if the fetch fails */
+          }
+        }
+
         // The run materialized a topic/project/build — refresh the lists.
         loadTopics();
         loadProjects();
         loadDashboard();
-        return r;
+        return {
+          runId: id,
+          topicId: runDoc?.topicId ?? null,
+          projectId: runDoc?.projectId ?? null,
+          buildRunId: buildRunId || null,
+          steps: Array.isArray(runDoc?.steps) ? runDoc.steps : [],
+          summary: String(runDoc?.summary || ""),
+          verification: runDoc?.verification ?? null,
+          files
+        };
       }),
-    [run, loadTopics, loadProjects, loadDashboard, lang]
+    [run, lang, loadTopics, loadProjects, loadDashboard]
   );
 
   const loadAgentRun = useCallback(
@@ -752,7 +936,6 @@ export function useGhostData() {
     loading,
     output,
     run,
-    agentRun,
     // data
     stats,
     topics,
@@ -761,6 +944,7 @@ export function useGhostData() {
     projects,
     plans,
     builds,
+    decisions,
     ingesting,
     scanning,
     // selections
@@ -779,11 +963,14 @@ export function useGhostData() {
     loadProjects,
     loadPlans,
     loadBuilds,
+    loadDecisions,
     refreshAll,
     // actions
     createTopic,
     addSource,
     addSources,
+    ingestProgress,
+    clearIngestProgress,
     reingestSource,
     deleteSource,
     extractSkills,
@@ -800,6 +987,8 @@ export function useGhostData() {
     generatePlan,
     build,
     openBuild,
+    // autonomous agent (Autopilot)
+    agentRun,
     runAgent,
     loadAgentRun,
     loadMap,

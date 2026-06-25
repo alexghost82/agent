@@ -103,23 +103,6 @@ private enum Fx {
        "skillIds":[],"summary":null,"ingestStatus":"none","createdAt":{"_seconds":2,"_nanoseconds":0}}
     ]}
     """#
-    static let agentRun = #"""
-    {"runId":"run_42","topicId":"t_1","projectId":"p_1","buildRunId":"b_1","summary":"ok",
-     "files":[{"path":"README.md","content":"# Hi","language":"markdown","bytes":4},
-              {"path":"src/index.ts","content":"export const x = 1;"}],
-     "verification":{"status":"passed"},
-     "steps":[{"name":"learning","status":"done","detail":"2/2"},{"name":"building","status":"done"}]}
-    """#
-    static let agentRunStatus = #"""
-    {"run":{"id":"run_7","status":"building","task":"t","topicId":"t","projectId":"p",
-     "buildRunId":null,"errorCode":null,"summary":null,
-     "createdAt":{"_seconds":1718000000,"_nanoseconds":0},
-     "steps":[{"name":"learning","status":"done"},{"name":"skilling","status":"done","detail":"3 skills"}]}}
-    """#
-    static let agentRuns = #"""
-    {"runs":[{"id":"r1","status":"ready","task":"A","steps":[{"name":"building","status":"done"}]},
-             {"id":"r2","status":"error","task":"B","errorCode":"no_api_key","steps":[]}]}
-    """#
     static let errorUnauthorized = #"{"error":"unauthorized","requestId":"req_abc123"}"#
     static let errorRateLimited = #"{"error":"rate_limited","requestId":"req_9"}"#
 }
@@ -166,22 +149,6 @@ final class APIParityRequestTests: XCTestCase {
         XCTAssertNil(req.body)
     }
 
-    func testAgentRunPostsFullBodyWithBearer() async throws {
-        answer(suffix: "/agent/run", Fx.agentRun)
-        _ = try await parityClient().agentRun(urls: ["https://a.dev"], task: "t", deep: true, lang: "ru", token: "tokA")
-        let req = try XCTUnwrap(cap("/agent/run"))
-        XCTAssertEqual(req.method, "POST")
-        XCTAssertEqual(req.authorization, "Bearer tokA")
-        XCTAssertEqual(bodyKeys("/agent/run"), ["urls", "task", "deep", "lang"])
-    }
-
-    func testAgentRunStatusEncodesIdInPath() async throws {
-        answer(suffix: "/agent/runs/run_7", Fx.agentRunStatus)
-        _ = try await parityClient().agentRunStatus(id: "run_7", token: "tokS")
-        let req = try XCTUnwrap(cap("/agent/runs/run_7"))
-        XCTAssertEqual(req.method, "GET")
-        XCTAssertTrue(req.url.path.hasSuffix("/api/agent/runs/run_7"))
-    }
 }
 
 // MARK: - Response decoding parity
@@ -215,29 +182,6 @@ final class APIParityResponseTests: XCTestCase {
         XCTAssertNil(res.projects.last?.stack)
     }
 
-    func testAgentRunResultDecodes() async throws {
-        answer(suffix: "/agent/run", Fx.agentRun)
-        let res = try await parityClient().agentRun(urls: ["https://a.dev"], task: "t", deep: false, lang: "en", token: "tok")
-        XCTAssertEqual(res.runId, "run_42")
-        XCTAssertEqual(res.files.count, 2)
-        XCTAssertNil(res.files.last?.language)
-        XCTAssertEqual(res.steps.count, 2)
-    }
-
-    func testAgentRunStatusEnvelopeDecodes() async throws {
-        answer(suffix: "/agent/runs/run_7", Fx.agentRunStatus)
-        let run = try await parityClient().agentRunStatus(id: "run_7", token: "tok")
-        XCTAssertEqual(run.id, "run_7")
-        XCTAssertEqual(run.status, "building")
-        XCTAssertNil(run.buildRunId)
-    }
-
-    func testAgentRunsListDecodes() async throws {
-        answer(suffix: "/agent/runs", Fx.agentRuns)
-        let runs = try await parityClient().agentRuns(token: "tok")
-        XCTAssertEqual(runs.count, 2)
-        XCTAssertEqual(runs.last?.errorCode, "no_api_key")
-    }
 }
 
 // MARK: - Error envelope parity
@@ -258,9 +202,9 @@ final class APIParityErrorTests: XCTestCase {
     }
 
     func testRateLimitedMapsToServerError() async {
-        answer(suffix: "/agent/run", status: 429, Fx.errorRateLimited)
+        answer(suffix: "/projects", status: 429, Fx.errorRateLimited)
         do {
-            _ = try await parityClient().agentRun(urls: ["https://a.dev"], task: "t", deep: false, lang: "en", token: "tok")
+            _ = try await parityClient().projects(token: "tok")
             XCTFail("expected APIClientError.server")
         } catch let APIClientError.server(code, requestId, status) {
             XCTAssertEqual(code, "rate_limited")

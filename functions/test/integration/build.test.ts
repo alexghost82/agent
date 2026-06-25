@@ -69,13 +69,13 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: build router", () => {
     const user = await seedUser();
     const projectId = await addDoc("projects", { userId: user.userId, name: "Owned", description: "owned", skillIds: [] });
     const res = await srv.request("POST", `/projects/${projectId}/build`, { token: user.token, body: {} });
+    // Build is now async: the route fast-fails the missing-key check BEFORE it
+    // enqueues a job, so the caller still gets a synchronous 400 and no build_run
+    // is created (nothing ran).
     expectError(res, 400, "no_api_key");
-    // The run should be recorded as errored (observability), still owned by the caller.
     const list = await srv.request("GET", `/builds?projectId=${projectId}`, { token: user.token });
     expect(list.status).toBe(200);
-    expect(list.body.runs.length).toBe(1);
-    expect(list.body.runs[0].status).toBe("error");
-    expect(list.body.runs[0].userId).toBe(user.userId);
+    expect(list.body.runs.length).toBe(0);
   });
 
   it("lists only the caller's build runs and isolates a single run + artifacts", async () => {

@@ -6,7 +6,6 @@ import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { OverviewPanel } from "./components/panels/OverviewPanel";
-import { AgentPanel } from "./components/panels/AgentPanel";
 import { SourcesPanel } from "./components/panels/SourcesPanel";
 import { SkillsPanel } from "./components/panels/SkillsPanel";
 import { ProjectsPanel } from "./components/panels/ProjectsPanel";
@@ -14,6 +13,7 @@ import { AskPanel } from "./components/panels/AskPanel";
 import { DesignPanel } from "./components/panels/DesignPanel";
 import { PlanPanel } from "./components/panels/PlanPanel";
 import { BuildPanel } from "./components/panels/BuildPanel";
+import { AgentPanel } from "./components/panels/AgentPanel";
 import { SettingsPanel } from "./components/panels/SettingsPanel";
 
 export default function Home() {
@@ -31,7 +31,6 @@ export default function Home() {
         <Topbar g={g} />
 
         {active === "overview" && <OverviewPanel g={g} />}
-        {active === "agent" && <AgentPanel g={g} />}
         {active === "sources" && <SourcesPanel g={g} />}
         {active === "skills" && <SkillsPanel g={g} />}
         {active === "projects" && <ProjectsPanel g={g} />}
@@ -39,6 +38,7 @@ export default function Home() {
         {active === "design" && <DesignPanel g={g} />}
         {active === "plan" && <PlanPanel g={g} />}
         {active === "build" && <BuildPanel g={g} />}
+        {active === "agents" && <AgentPanel g={g} />}
         {active === "settings" && <SettingsPanel g={g} />}
       </main>
     </div>
