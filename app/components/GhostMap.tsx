@@ -33,6 +33,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 interface MergedDetails {
   purpose?: string;
+  usage?: string;
   stack?: string[];
   inputs?: string[];
   outputs?: string[];
@@ -277,6 +278,7 @@ export function GhostMap({ data, projectId, projectName, t, loadNodeDetail }: Gh
     const logicRemote = typeof dd.logic === "string" ? [dd.logic as string] : asArr(dd.logic);
     return {
       purpose: (dd.purpose as string) || base.purpose || (detail?.description as string) || modalNode?.desc || undefined,
+      usage: (dd.usage as string) || (detail?.usage as string) || base.usage || undefined,
       stack: asArr(dd.stack).length ? asArr(dd.stack) : base.stack,
       inputs: asArr(dd.inputs).length ? asArr(dd.inputs) : base.inputs,
       outputs: asArr(dd.outputs).length ? asArr(dd.outputs) : base.outputs,
@@ -477,6 +479,7 @@ export function GhostMap({ data, projectId, projectName, t, loadNodeDetail }: Gh
                     <div className="gm-title">{n.title}</div>
                     <div className="gm-kind">{n.kind}</div>
                   </div>
+                  {n.subtitle ? <div className="gm-subtitle">{n.subtitle}</div> : null}
                   {n.desc ? <div className="gm-desc">{n.desc}</div> : null}
                   {n.tags.length ? (
                     <div className="gm-tags">
@@ -576,6 +579,12 @@ export function GhostMap({ data, projectId, projectName, t, loadNodeDetail }: Gh
                   <h4>{tr.intelPurpose || "Purpose"}</h4>
                   <div className="gm-flow">{merged.purpose || tr.intelNodeMissing || "No description."}</div>
                 </div>
+                {merged.usage ? (
+                  <div className="gm-card">
+                    <h4>{tr.intelUsage || "Usage"}</h4>
+                    <div className="gm-flow">{merged.usage}</div>
+                  </div>
+                ) : null}
                 {merged.stack?.length ? (
                   <div className="gm-card">
                     <h4>{tr.intelStack || "Stack"}</h4>

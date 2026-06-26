@@ -62,6 +62,55 @@ describe("normalizeToGhostMap", () => {
     expect(nodes).toEqual([]);
     expect(edges).toEqual([]);
   });
+
+  it("never uses a raw file path as the card description (path goes to subtitle)", () => {
+    const data: ProjectMapData = {
+      nodes: [
+        {
+          id: "a",
+          type: "service",
+          label: "Sign-in service",
+          confidence: "inferred",
+          layers: ["architecture"],
+          position: { x: 0, y: 0 },
+          files: ["functions/src/auth/service.ts"]
+        } as any
+      ],
+      edges: [],
+      technologies: [],
+      features: [],
+      insights: [],
+      stats: { files: 1, nodes: 1, edges: 0 }
+    };
+    const node = normalizeToGhostMap(data).nodes.find((n) => n.id === "a")!;
+    expect(node.desc).toBe("");
+    expect(node.subtitle).toBe("functions/src/auth/service.ts");
+  });
+
+  it("carries human usage through to node details", () => {
+    const data: ProjectMapData = {
+      nodes: [
+        {
+          id: "a",
+          type: "feature",
+          label: "Sign-in",
+          description: "Lets people sign in",
+          usage: "Used when a visitor logs in",
+          confidence: "inferred",
+          layers: ["overview"],
+          position: { x: 0, y: 0 }
+        } as any
+      ],
+      edges: [],
+      technologies: [],
+      features: [],
+      insights: [],
+      stats: { files: 0, nodes: 1, edges: 0 }
+    };
+    const node = normalizeToGhostMap(data).nodes.find((n) => n.id === "a")!;
+    expect(node.desc).toBe("Lets people sign in");
+    expect(node.details.usage).toBe("Used when a visitor logs in");
+  });
 });
 
 describe("GhostMap render", () => {

@@ -6,7 +6,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var firebaseEmail = ""
     @State private var firebasePassword = ""
-    @State private var showFirebase = false
+    @State private var showFirebase = ProcessInfo.processInfo.arguments.contains("-uiTestExpandFirebase")
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -14,6 +14,18 @@ struct LoginView: View {
         case password
         case firebaseEmail
         case firebasePassword
+
+        /// Stable, unique accessibility identifier per field so UI automation
+        /// (and assistive tech) can distinguish the primary login inputs from
+        /// the Firebase email/password inputs.
+        var accessibilityID: String {
+            switch self {
+            case .username: return "username-field"
+            case .password: return "password-field"
+            case .firebaseEmail: return "firebase-email-field"
+            case .firebasePassword: return "firebase-password-field"
+            }
+        }
     }
 
     private var t: Strings { model.t }
@@ -124,12 +136,38 @@ struct LoginView: View {
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 32)
-        .background(BrandTheme.ColorToken.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(BrandTheme.ColorToken.line, lineWidth: 1)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+            ZStack {
+                shape.fill(.ultraThinMaterial)
+                shape.fill(BrandTheme.ColorToken.panel.opacity(0.55))
+                // Top-edge sheen so the glass catches light.
+                shape.fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.10), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
+            }
         }
-        .shadow(color: .black.opacity(0.35), radius: 40, y: 24)
+        .overlay {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.35),
+                            BrandTheme.ColorToken.accent.opacity(0.35),
+                            BrandTheme.ColorToken.accentSecondary.opacity(0.30)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .shadow(color: BrandTheme.ColorToken.accent.opacity(0.25), radius: 50, y: 24)
+        .shadow(color: .black.opacity(0.45), radius: 30, y: 18)
     }
 
     // MARK: - Firebase sign-in (ID-token exchange via POST /auth/firebase)
@@ -252,15 +290,14 @@ struct LoginView: View {
             if isSecure {
                 SecureField(placeholder, text: text)
                     .textContentType(.password)
-                    .accessibilityIdentifier("password-field")
             } else {
                 TextField(placeholder, text: text)
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .accessibilityIdentifier("username-field")
             }
         }
+        .accessibilityIdentifier(field.accessibilityID)
         .font(.subheadline)
         .focused($focusedField, equals: field)
         .submitLabel(submitLabel)
@@ -333,19 +370,7 @@ struct LoginView: View {
 
 private struct LoginBackground: View {
     var body: some View {
-        ZStack {
-            BrandTheme.ColorToken.background
-            RadialGradient(
-                colors: [
-                    BrandTheme.ColorToken.accent.opacity(0.20),
-                    .clear
-                ],
-                center: UnitPoint(x: 0.5, y: -0.1),
-                startRadius: 10,
-                endRadius: 520
-            )
-        }
-        .ignoresSafeArea()
+        AuroraBackground()
     }
 }
 

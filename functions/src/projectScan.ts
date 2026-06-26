@@ -65,6 +65,7 @@ export async function runScanJob(payload: ScanPayload, deps: RunProjectScanDeps 
         userId,
         projectId,
         projectName: (snap.data()?.name as string) || "Project",
+        projectDescription: (snap.data()?.description as string) || "",
         scanId,
         repoUrl,
         token,

@@ -312,6 +312,16 @@
   background: var(--gm-kind-bg);
   white-space: nowrap;
 }
+.ghost-map .gm-node .gm-subtitle {
+  font-size: 10px;
+  color: var(--gm-kind-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 3px 0 0;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ghost-map .gm-node .gm-desc {
   font-size: 12px;
   color: var(--gm-node-desc);

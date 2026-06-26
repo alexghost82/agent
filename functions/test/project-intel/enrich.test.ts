@@ -62,21 +62,23 @@ beforeEach(() => {
 });
 
 describe("enrichWithAI (project-intelligence)", () => {
-  it("maps a valid model response onto nodes, features and insights", async () => {
-    ai.llm.mockResolvedValue(
-      JSON.stringify({
-        summary: "A demo app for X.",
-        features: [{ key: "auth", purpose: "Signs users in." }],
-        userFlows: ["User logs in", "User signs out"],
-        risks: ["No rate limiting on login"]
-      })
-    );
+  it("maps the project-level pass onto root/feature/insights", async () => {
+    // First call = project-level object; later calls = node batches (arrays).
+    ai.llm
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          summary: "A demo app for X.",
+          features: [{ key: "auth", purpose: "Signs users in." }],
+          userFlows: ["User logs in", "User signs out"],
+          risks: ["No rate limiting on login"]
+        })
+      )
+      .mockResolvedValue("[]");
 
     const input = baseInput();
     const res = await enrichWithAI(input);
 
     expect(res.aiUsed).toBe(true);
-    expect(ai.llm).toHaveBeenCalledTimes(1);
 
     // Project summary lands on the root node (marked inferred, non-mutating to input).
     const root = res.nodes.find((n) => n.type === "project")!;
@@ -85,11 +87,8 @@ describe("enrichWithAI (project-intelligence)", () => {
     expect((root.metadata as any).aiSummary).toBe(true);
     expect(input.nodes.find((n) => n.type === "project")!.description).toBeUndefined();
 
-    // Per-feature purpose lands on both the feature record and the feature node.
+    // Per-feature purpose lands on the feature record.
     expect(res.features.find((f) => f.key === "auth")!.description).toBe("Signs users in.");
-    const featNode = res.nodes.find((n) => n.metadata?.key === "auth")!;
-    expect(featNode.description).toBe("Signs users in.");
-    expect(featNode.confidence).toBe("inferred");
 
     // userFlows (2) + risks (1) become inferred "note" insights.
     const notes = res.insights.filter((i) => i.kind === "note" && i.confidence === "inferred");
@@ -98,15 +97,40 @@ describe("enrichWithAI (project-intelligence)", () => {
     expect(notes.some((n) => n.detail === "No rate limiting on login")).toBe(true);
   });
 
-  it("returns the inputs unchanged when the model output is not parseable", async () => {
+  it("humanizes meaningful nodes with name / purpose / usage from the node pass", async () => {
+    ai.llm
+      .mockResolvedValueOnce("{}") // project-level pass (no-op)
+      .mockResolvedValue(
+        JSON.stringify([
+          { id: "n-route", name: "Login endpoint", purpose: "Authenticates a user", usage: "Called when a user submits the login form" }
+        ])
+      );
+
+    const input = baseInput();
+    const res = await enrichWithAI(input);
+
+    expect(res.aiUsed).toBe(true);
+    const route = res.nodes.find((n) => n.id === "n-route")!;
+    expect(route.label).toBe("Login endpoint");
+    expect(route.description).toBe("Authenticates a user");
+    expect(route.usage).toBe("Called when a user submits the login form");
+    expect(route.confidence).toBe("inferred");
+    // The original technical label is preserved as metadata.path.
+    expect((route.metadata as any).path).toBe("/login");
+
+    // Input is never mutated (a working copy is returned).
+    expect(input.nodes.find((n) => n.id === "n-route")!.label).toBe("/login");
+  });
+
+  it("returns the inputs (by value) unchanged when the model output is not parseable", async () => {
     ai.llm.mockResolvedValue("not json at all");
     const input = baseInput();
     const res = await enrichWithAI(input);
 
     expect(res.aiUsed).toBe(false);
-    expect(res.nodes).toBe(input.nodes);
-    expect(res.features).toBe(input.features);
-    expect(res.insights).toBe(input.insights);
+    // Content is unchanged even though a fresh copy is returned.
+    expect(res.nodes).toEqual(input.nodes);
+    expect(res.nodes.find((n) => n.type === "project")!.description).toBeUndefined();
   });
 
   it("never throws when the provider errors (returns fallback, aiUsed=false)", async () => {
@@ -115,6 +139,6 @@ describe("enrichWithAI (project-intelligence)", () => {
     const res = await enrichWithAI(input);
 
     expect(res.aiUsed).toBe(false);
-    expect(res.nodes).toBe(input.nodes);
+    expect(res.nodes).toEqual(input.nodes);
   });
 });

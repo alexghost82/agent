@@ -155,6 +155,9 @@ export interface IntelNode {
   // Grouping handle (feature id or directory) for collapsible groups.
   group?: string;
   description?: string;
+  // Human-language "how / when this is used" (предназначение/использование),
+  // produced by the AI enrichment layer. Surfaced in the node detail view.
+  usage?: string;
   confidence: Confidence;
   layers: LayerId[];
   files: string[];

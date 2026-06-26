@@ -23,6 +23,22 @@ final class GhostAgentTests: XCTestCase {
     }
 }
 
+// MARK: - Live Firebase configuration (GoogleService-Info.plist → agent-9d7c2)
+
+@MainActor
+final class FirebaseBootstrapConfigTests: XCTestCase {
+    /// When the real GoogleService-Info.plist is bundled, FirebaseApp.configure()
+    /// must succeed and resolve the live project id. The plist is a local-only
+    /// secret (gitignored), so this test skips where it isn't present rather than
+    /// failing builds that don't carry the config.
+    func testBundledConfigConfiguresLiveProject() throws {
+        let hasPlist = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil
+        try XCTSkipUnless(hasPlist, "GoogleService-Info.plist not bundled in this build")
+
+        XCTAssertEqual(FirebaseBootstrap.configure(), .configured(projectID: "agent-9d7c2"))
+    }
+}
+
 // MARK: - Async ingest status mapping (CONTRACT: queued → ingesting → ready)
 
 @MainActor

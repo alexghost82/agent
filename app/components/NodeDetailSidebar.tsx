@@ -100,6 +100,12 @@ export function NodeDetailSidebar({ projectId, nodeId, loadNodeDetail, onClose, 
                   <p>{details.purpose}</p>
                 </div>
               ) : null}
+              {details.usage ? (
+                <div className="intel-detail-row">
+                  <h5>{t?.intelUsage || "Usage"}</h5>
+                  <p>{details.usage}</p>
+                </div>
+              ) : null}
               {details.logic ? (
                 <div className="intel-detail-row">
                   <h5>{t?.intelLogic || "Logic"}</h5>

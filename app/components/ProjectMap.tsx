@@ -63,6 +63,10 @@ interface RawNode {
   hasRisk?: boolean;
   // Optional richer fields (present in the demo payload / future enriched scans).
   description?: string;
+  // Technical file reference shown subtly under the (humanized) title.
+  subtitle?: string;
+  // Human "how / when this is used" (использование).
+  usage?: string;
   tags?: string[];
   files?: string[];
   details?: NodeDetails;

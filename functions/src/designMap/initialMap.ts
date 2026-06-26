@@ -106,10 +106,10 @@ export function buildInitialDesignMap(project: InitialMapProject): {
     addFeature("summary", "feature", "Summary", project.summary);
   }
   if (project.stack) {
-    addFeature("stack", "module", `Stack: ${project.stack}`, project.stack);
+    addFeature("stack", "module", "Technology stack", `Technologies this project is built with: ${project.stack}`);
   }
   if (project.repoUrl) {
-    addFeature("repo", "module", "Repository", project.repoUrl);
+    addFeature("repo", "module", "Source repository", `Where the project's code lives: ${project.repoUrl}`);
   }
 
   // Skill nodes (column 3), laid out in a grid so a long list wraps into
@@ -153,6 +153,8 @@ export interface ScanGraphNodeInput {
   type: string;
   label: string;
   description?: string;
+  // Human "how / when it's used" carried over from the scan's AI enrichment.
+  usage?: string;
   confidence?: string;
 }
 
@@ -278,13 +280,15 @@ export function buildDesignMapFromScanGraph(
     idMap.set(n.id, designId);
     const col = 2 + Math.floor(index / ROWS_PER_COL);
     const row = index % ROWS_PER_COL;
+    const usage = n.usage ? truncate(n.usage, 5000) : undefined;
     nodes.push({
       id: designId,
       type: mapNodeType(n.type),
       label: truncate(n.label || designId, 200),
       description: n.description ? truncate(n.description, 5000) : undefined,
       position: { x: col * COL_W, y: row * ROW_H },
-      confidence: mapConfidence(n.confidence)
+      confidence: mapConfidence(n.confidence),
+      ...(usage ? { data: { usage } } : {})
     });
   });
 

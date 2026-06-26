@@ -18,6 +18,10 @@ export interface RunProjectScanInput {
   userId: string;
   projectId: string;
   projectName: string;
+  // Free-text project description, forwarded to the AI enrichment layer as a
+  // language/context hint (so node names/purpose/usage match the project's
+  // language). Optional — older callers omit it.
+  projectDescription?: string;
   scanId: string;
   repoUrl: string;
   token?: string;
@@ -82,6 +86,7 @@ export async function runProjectScan(
     await updateScan(scanId, { phase: "ai" });
     const enriched = await enrichFn({
       projectName: input.projectName,
+      projectDescription: input.projectDescription,
       nodes,
       technologies,
       features,

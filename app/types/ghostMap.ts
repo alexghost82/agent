@@ -36,6 +36,8 @@ export interface MapGroup {
 
 export interface MapNodeDetails {
   purpose?: string;
+  // Human "how / when this is used" (использование).
+  usage?: string;
   stack?: string[];
   inputs?: string[];
   outputs?: string[];
@@ -51,6 +53,9 @@ export interface MapNode {
   kind: string;
   layer: string;
   desc: string;
+  // Technical reference (file path / module key) shown subtly under the human
+  // title, so the structural pointer isn't lost once the title is humanized.
+  subtitle?: string;
   tags: string[];
   x: number;
   y: number;

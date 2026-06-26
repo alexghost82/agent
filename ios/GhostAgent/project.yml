@@ -46,3 +46,14 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: GhostAgent
+
+  GhostAgentUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: GhostAgentUITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: GhostAgent

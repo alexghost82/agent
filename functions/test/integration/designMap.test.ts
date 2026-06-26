@@ -172,7 +172,8 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: design-map router", () => {
       scanId,
       nodeId: "feat-auth",
       description: "Authentication feature",
-      details: { purpose: "Authentication feature" }
+      usage: "Used whenever a visitor signs in",
+      details: { purpose: "Authentication feature", usage: "Used whenever a visitor signs in" }
     });
 
     const res = await srv.request("GET", `/projects/${projectId}/design-map`, { token: user.token });
@@ -184,9 +185,11 @@ describe.skipIf(!EMULATOR_AVAILABLE)("integration: design-map router", () => {
     expect(byId.get("project").data.projectId).toBe(projectId);
     expect(byId.has("intel-project-root")).toBe(false);
 
-    // Intel nodes translated by type, with description hydrated from project_nodes.
+    // Intel nodes translated by type, with description + usage hydrated from
+    // project_nodes.
     expect(byId.get("intel-feat-auth").type).toBe("feature");
     expect(byId.get("intel-feat-auth").description).toBe("Authentication feature");
+    expect(byId.get("intel-feat-auth").data?.usage).toBe("Used whenever a visitor signs in");
     expect(byId.get("intel-route-login").type).toBe("api_route");
 
     // owns -> contains edge reattaches to the design root.

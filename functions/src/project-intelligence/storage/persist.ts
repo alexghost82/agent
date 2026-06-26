@@ -207,6 +207,7 @@ function logicForType(type: NodeType): string {
 
 interface NodeDetailBlock {
   purpose: string;
+  usage: string;
   stack: string[];
   inputs: string[];
   outputs: string[];
@@ -241,6 +242,9 @@ function buildNodeDetails(
 
   return {
     purpose: clampText(node.description || logicForType(node.type)),
+    // Human "how / when it's used" — AI-provided when available, otherwise a
+    // plain per-type sentence so the field is never empty.
+    usage: clampText(node.usage || logicForType(node.type)),
     stack: Array.from(stack).slice(0, DETAIL_LIST_CAP),
     inputs,
     outputs,
@@ -250,13 +254,27 @@ function buildNodeDetails(
   };
 }
 
+// Technical reference shown subtly under the (human) node label on the card:
+// the original file path / module key / package name. Kept so the structural
+// pointer isn't lost once `label` becomes a human name.
+function nodeSubtitle(n: IntelNode): string | null {
+  const path = n.metadata?.path;
+  if (typeof path === "string" && path) return path;
+  const key = n.metadata?.key;
+  if (typeof key === "string" && key) return key;
+  if (n.files.length) return n.files[0];
+  return null;
+}
+
 // Light node shape stored in the fast-read snapshot (no description/files — those
-// are fetched lazily from project_nodes on click).
+// are fetched lazily from project_nodes on click). `subtitle` carries the
+// technical file reference so the card can show it under the human label.
 function lightNode(n: IntelNode) {
   return {
     id: n.id,
     type: n.type,
     label: n.label,
+    subtitle: nodeSubtitle(n),
     group: n.group ?? null,
     confidence: n.confidence,
     layers: n.layers,
@@ -339,8 +357,10 @@ export async function persistScanGraph(input: PersistGraphInput): Promise<void> 
         nodeId: n.id,
         type: n.type,
         label: n.label,
+        subtitle: nodeSubtitle(n),
         group: n.group ?? null,
         description: n.description ?? null,
+        usage: n.usage ?? null,
         confidence: n.confidence,
         layers: n.layers,
         files: n.files,
@@ -517,6 +537,7 @@ export interface ScanGraphNodeView {
   type: string;
   label: string;
   description?: string;
+  usage?: string;
   confidence?: string;
 }
 
@@ -596,8 +617,10 @@ export async function readLatestCompletedScanGraph(
     })
     .slice(0, DESIGN_SEED_NODE_CAP);
 
-  // Hydrate descriptions from the per-node detail docs in a single batched read.
+  // Hydrate descriptions + usage from the per-node detail docs in a single
+  // batched read.
   const descById = new Map<string, string>();
+  const usageById = new Map<string, string>();
   const refs = kept.map((n) =>
     db.collection("project_nodes").doc(`${scan.id}__${String(n.id)}`)
   );
@@ -612,6 +635,11 @@ export async function readLatestCompletedScanGraph(
       const description =
         (typeof d.description === "string" && d.description) || purpose || "";
       if (description) descById.set(String(d.nodeId), description);
+      const usage =
+        (typeof d.usage === "string" && d.usage) ||
+        (d.details && typeof d.details.usage === "string" && d.details.usage) ||
+        "";
+      if (usage) usageById.set(String(d.nodeId), usage);
     }
   }
 
@@ -619,11 +647,13 @@ export async function readLatestCompletedScanGraph(
   const nodes: ScanGraphNodeView[] = kept.map((n) => {
     const id = String(n.id);
     const description = descById.get(id);
+    const usage = usageById.get(id);
     return {
       id,
       type: String(n.type),
       label: String(n.label ?? id),
       ...(description ? { description } : {}),
+      ...(usage ? { usage } : {}),
       ...(n.confidence ? { confidence: String(n.confidence) } : {})
     };
   });

@@ -19,6 +19,7 @@ export function DesignMapSidebar({ node, onChange, onClose, t }: DesignMapSideba
   }
 
   const details = node.data ?? {};
+  const usage = typeof details.usage === "string" ? details.usage : "";
 
   return (
     <div className="design-map-sidebar">
@@ -48,6 +49,13 @@ export function DesignMapSidebar({ node, onChange, onClose, t }: DesignMapSideba
           onChange={(e) => onChange({ description: e.target.value })}
         />
       </label>
+
+      {usage ? (
+        <div className="dm-field dm-field-readonly">
+          <span className="dm-field-label">{t?.intelUsage || "Usage"}</span>
+          <span className="dm-field-value">{usage}</span>
+        </div>
+      ) : null}
 
       <div className="dm-field dm-field-readonly">
         <span className="dm-field-label">{t?.nodeType || "Type"}</span>

@@ -39,6 +39,8 @@ export type ProjectMapSeverity = "info" | "warning" | "critical";
 // Rich, lazily-loaded per-node detail surfaced by the "Read more" view.
 export interface NodeDetails {
   purpose?: string;
+  // Human "how / when this is used" (использование).
+  usage?: string;
   stack?: string[];
   inputs?: string[];
   outputs?: string[];
@@ -56,6 +58,10 @@ export interface ProjectMapNode {
   // Node classification. `kind` is the contract field; `type` is legacy/live.
   kind?: ProjectMapNodeKind | string;
   type?: ProjectMapNodeKind | string;
+  // Technical file reference shown subtly under the (humanized) title.
+  subtitle?: string;
+  // Human "how / when this is used" (использование).
+  usage?: string;
   // A node can belong to several layers (live) or a single layer (contract).
   layer?: ProjectMapLayerId;
   layers?: ProjectMapLayerId[];

@@ -31,6 +31,8 @@ export interface DesignMapNodeData extends Record<string, unknown> {
   type: DesignMapNodeType;
   label: string;
   description?: string;
+  // Human "how / when this is used" (использование), carried from the scan.
+  usage?: string;
   skillId?: string;
   podskillId?: string;
   confidence?: DesignMapConfidence;

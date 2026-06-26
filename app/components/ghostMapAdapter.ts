@@ -89,7 +89,7 @@ function edgeStyle(type: string | undefined): MapEdge["type"] {
   }
 }
 
-function toDetails(n: { details?: unknown; files?: unknown; description?: unknown }): MapNodeDetails {
+function toDetails(n: { details?: unknown; files?: unknown; description?: unknown; usage?: unknown }): MapNodeDetails {
   const d = (n.details || {}) as Record<string, unknown>;
   const logicRaw = d.logic;
   const logic = Array.isArray(logicRaw)
@@ -99,6 +99,7 @@ function toDetails(n: { details?: unknown; files?: unknown; description?: unknow
       : undefined;
   return {
     purpose: s(d.purpose) || undefined,
+    usage: s(d.usage) || s(n.usage) || undefined,
     stack: arr(d.stack).length ? arr(d.stack) : undefined,
     inputs: arr(d.inputs).length ? arr(d.inputs) : undefined,
     outputs: arr(d.outputs).length ? arr(d.outputs) : undefined,
@@ -129,15 +130,17 @@ export function normalizeToGhostMap(data: ProjectMapData | null | undefined): No
     const haystack = [title, s(n.id), kind, tags.join(" "), files.join(" ")].join(" ");
     const base = TYPE_TO_LAYER[s(n.type)] || "data";
     const layer = refineLayer(base, haystack, !!n.hasRisk);
-    // Many scan file-nodes have no prose description; fall back to the primary
-    // file path (or the kind) so every card still carries useful context.
-    const desc = s(n.description) || files[0] || kind;
+    // Prefer the human description. Never fall back to a raw file path — that is
+    // shown subtly as the subtitle instead, so the card stays human-readable.
+    const desc = s(n.description);
+    const subtitle = s((n as { subtitle?: unknown }).subtitle) || files[0] || undefined;
     return {
       id: s(n.id),
       title,
       kind,
       layer,
       desc,
+      subtitle,
       tags,
       x: 0,
       y: 0,

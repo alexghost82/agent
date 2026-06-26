@@ -37,29 +37,7 @@ enum BrandTheme {
 
 struct BrandBackground: View {
     var body: some View {
-        ZStack {
-            BrandTheme.ColorToken.background
-            RadialGradient(
-                colors: [
-                    BrandTheme.ColorToken.accent.opacity(0.30),
-                    BrandTheme.ColorToken.accentSecondary.opacity(0.12),
-                    .clear
-                ],
-                center: .topLeading,
-                startRadius: 10,
-                endRadius: 520
-            )
-            RadialGradient(
-                colors: [
-                    BrandTheme.ColorToken.accentSecondary.opacity(0.20),
-                    .clear
-                ],
-                center: .bottomTrailing,
-                startRadius: 40,
-                endRadius: 460
-            )
-        }
-        .ignoresSafeArea()
+        AuroraBackground()
     }
 }
 

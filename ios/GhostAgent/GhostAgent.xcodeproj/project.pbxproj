@@ -18,10 +18,13 @@
 		6A452CB69283D88505C98C30 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C713997CA686CE7A9CB44003 /* ProjectsView.swift */; };
 		842539EBD82E324D6DB3E881 /* GhostAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAF3FDCEECDE64DCA041E334 /* GhostAgentTests.swift */; };
 		85A28FED5FA919540003FC7A /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FFF3EA1CB90E0C43A58A57C /* Models.swift */; };
+		85B0AE267CCBD1DBAF24C91D /* GhostAgentUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3954B9E26A68886DA05B63B2 /* GhostAgentUITests.swift */; };
 		8ED5B9006188396FFD453F1B /* FirebaseBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30999E6D992E4889DE39FE3E /* FirebaseBootstrap.swift */; };
 		992429CF32BFECBFA6301158 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 399C397B30EF5EB86A3C637F /* AppModel.swift */; };
+		9A6ED213F3A1F6C4E3C93607 /* APIParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5717AA82E62679A3E0084025 /* APIParityTests.swift */; };
 		A2EB104E1974F7E29147B132 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72CBFBCD74A261CFA91401F /* APIClient.swift */; };
 		AEE4DEE63E9B72919C9E53E9 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A3DB53F01D720189CFB42F44 /* GoogleService-Info.plist */; };
+		B248D945B5840CFFCAA3F087 /* AuroraBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1336F6206AC3546DECD65C /* AuroraBackground.swift */; };
 		B5531555C1DA685013BCDC98 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71DBF1C4441398D01BEEADA /* LoginView.swift */; };
 		CC96BCB4E823D3D550C958FE /* BrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 871E1739A93724AFE1F2E42D /* BrandMark.swift */; };
 		CE71C080DD37C7B7935AB137 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 244E72A63929148E666C0CC6 /* SettingsView.swift */; };
@@ -38,19 +41,30 @@
 			remoteGlobalIDString = D85F35005B6D13548467E80A;
 			remoteInfo = GhostAgent;
 		};
+		D3644CE805AC3DCE4DD5E7C8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2E19E51F0ED0FF27C28F8B8B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D85F35005B6D13548467E80A;
+			remoteInfo = GhostAgent;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1B1336F6206AC3546DECD65C /* AuroraBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraBackground.swift; sourceTree = "<group>"; };
 		244E72A63929148E666C0CC6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2FFF3EA1CB90E0C43A58A57C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		30999E6D992E4889DE39FE3E /* FirebaseBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBootstrap.swift; sourceTree = "<group>"; };
+		3954B9E26A68886DA05B63B2 /* GhostAgentUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostAgentUITests.swift; sourceTree = "<group>"; };
 		399C397B30EF5EB86A3C637F /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		506D1C22FBE84B7F1B6DA96F /* GhostAgentUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GhostAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		50DD0D26E364488F63A99E91 /* GhostAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostAgentApp.swift; sourceTree = "<group>"; };
+		5717AA82E62679A3E0084025 /* APIParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIParityTests.swift; sourceTree = "<group>"; };
 		5C8243D9BD6E0994BBBFC87E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5E82AF2BAA994E5D7491C402 /* GhostAgentTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GhostAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		68E7D88F19B399E2C1BDC2A2 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		6B96C516A587C31E35CC6094 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		77FA2265FF0B6007A2679043 /* GhostAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GhostAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		77FA2265FF0B6007A2679043 /* GhostAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GhostAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D4E603DDBA6B0C57766278C /* ParityPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParityPanels.swift; sourceTree = "<group>"; };
 		7E972159F82FB7FDCAF1BDFF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		871E1739A93724AFE1F2E42D /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
@@ -78,11 +92,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		176237404CC9CE75AD2A8C04 /* GhostAgentUITests */ = {
+			isa = PBXGroup;
+			children = (
+				3954B9E26A68886DA05B63B2 /* GhostAgentUITests.swift */,
+			);
+			path = GhostAgentUITests;
+			sourceTree = "<group>";
+		};
 		18D071F21A8BA2B183FA804C /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				77FA2265FF0B6007A2679043 /* GhostAgent.app */,
 				5E82AF2BAA994E5D7491C402 /* GhostAgentTests.xctest */,
+				506D1C22FBE84B7F1B6DA96F /* GhostAgentUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -94,6 +117,7 @@
 				E6592A14F2CF9C083589848D /* AppConfig.swift */,
 				399C397B30EF5EB86A3C637F /* AppModel.swift */,
 				7E972159F82FB7FDCAF1BDFF /* Assets.xcassets */,
+				1B1336F6206AC3546DECD65C /* AuroraBackground.swift */,
 				871E1739A93724AFE1F2E42D /* BrandMark.swift */,
 				B868B55BC6A918CCE0BEFF1F /* BrandTheme.swift */,
 				8FFD202B3DF7031A7C91660D /* ContentView.swift */,
@@ -116,6 +140,7 @@
 		835C6504D1D919CD12043F54 /* GhostAgentTests */ = {
 			isa = PBXGroup;
 			children = (
+				5717AA82E62679A3E0084025 /* APIParityTests.swift */,
 				AAF3FDCEECDE64DCA041E334 /* GhostAgentTests.swift */,
 			);
 			path = GhostAgentTests;
@@ -126,6 +151,7 @@
 			children = (
 				20BDB7FFA7E584ACA286EC0A /* GhostAgent */,
 				835C6504D1D919CD12043F54 /* GhostAgentTests */,
+				176237404CC9CE75AD2A8C04 /* GhostAgentUITests */,
 				18D071F21A8BA2B183FA804C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -172,6 +198,24 @@
 			productReference = 5E82AF2BAA994E5D7491C402 /* GhostAgentTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		FC1B7006482EDE57EFD6AF2E /* GhostAgentUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6C3F6663A86C9F7D946F6C10 /* Build configuration list for PBXNativeTarget "GhostAgentUITests" */;
+			buildPhases = (
+				D272D68CE4F770661EAC639C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9C8D7FB274F6D1B93F07849B /* PBXTargetDependency */,
+			);
+			name = GhostAgentUITests;
+			packageProductDependencies = (
+			);
+			productName = GhostAgentUITests;
+			productReference = 506D1C22FBE84B7F1B6DA96F /* GhostAgentUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -180,6 +224,11 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					FC1B7006482EDE57EFD6AF2E = {
+						TestTargetID = D85F35005B6D13548467E80A;
+					};
+				};
 			};
 			buildConfigurationList = 614B5A128FB1D3F49F7B9DE8 /* Build configuration list for PBXProject "GhostAgent" */;
 			developmentRegion = en;
@@ -200,6 +249,7 @@
 			targets = (
 				D85F35005B6D13548467E80A /* GhostAgent */,
 				F34503425CE853278D13FE37 /* GhostAgentTests */,
+				FC1B7006482EDE57EFD6AF2E /* GhostAgentUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -221,7 +271,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A6ED213F3A1F6C4E3C93607 /* APIParityTests.swift in Sources */,
 				842539EBD82E324D6DB3E881 /* GhostAgentTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D272D68CE4F770661EAC639C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				85B0AE267CCBD1DBAF24C91D /* GhostAgentUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -232,6 +291,7 @@
 				A2EB104E1974F7E29147B132 /* APIClient.swift in Sources */,
 				49DF346DB11D4D995213CA5C /* AppConfig.swift in Sources */,
 				992429CF32BFECBFA6301158 /* AppModel.swift in Sources */,
+				B248D945B5840CFFCAA3F087 /* AuroraBackground.swift in Sources */,
 				CC96BCB4E823D3D550C958FE /* BrandMark.swift in Sources */,
 				426DDCD4118C0C8202334B70 /* BrandTheme.swift in Sources */,
 				556844D6375DB66AB57B1AAC /* ContentView.swift in Sources */,
@@ -251,6 +311,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		9C8D7FB274F6D1B93F07849B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D85F35005B6D13548467E80A /* GhostAgent */;
+			targetProxy = D3644CE805AC3DCE4DD5E7C8 /* PBXContainerItemProxy */;
+		};
 		C12C070387D18A9ECC0056F7 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = D85F35005B6D13548467E80A /* GhostAgent */;
@@ -259,13 +324,29 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		02B630AE83B7D013D5A25D5A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ghost.agent.GhostAgentUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = GhostAgent;
+			};
+			name = Release;
+		};
 		2C0859E3810B08811D50161B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 865A4QHV69;
 				INFOPLIST_FILE = GhostAgent/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -284,7 +365,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 865A4QHV69;
 				INFOPLIST_FILE = GhostAgent/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -369,15 +449,29 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
+				OTHER_LDFLAGS = "$(inherited) -ObjC";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7E5376A55EDA7A333EAED344 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ghost.agent.GhostAgentUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = GhostAgent;
 			};
 			name = Debug;
 		};
@@ -446,10 +540,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
+				OTHER_LDFLAGS = "$(inherited) -ObjC";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -466,6 +557,15 @@
 			buildConfigurations = (
 				79895C151ED498623B722B74 /* Debug */,
 				DF0CB6EF94BAA7EB4AA64E22 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6C3F6663A86C9F7D946F6C10 /* Build configuration list for PBXNativeTarget "GhostAgentUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E5376A55EDA7A333EAED344 /* Debug */,
+				02B630AE83B7D013D5A25D5A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

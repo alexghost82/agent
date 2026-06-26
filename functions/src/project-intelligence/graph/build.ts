@@ -77,24 +77,24 @@ function moduleKey(path: string): string {
 }
 
 function describeFile(role: FileRole, language: string | null): string {
-  const lang = language ? ` (${language})` : "";
+  const lang = language ? ` Written in ${language}.` : "";
   const label: Record<string, string> = {
-    route: "API route / controller",
-    service: "Service / business logic",
-    component: "UI component",
-    worker: "Background worker / job",
-    schema: "Data schema / model",
-    migration: "Database migration",
-    config: "Configuration",
-    hook: "Hook",
-    store: "State store",
-    test: "Test",
-    doc: "Documentation",
-    style: "Stylesheet",
-    source: "Source module",
-    other: "File"
+    route: "Handles incoming requests for this part of the app and returns responses.",
+    service: "Holds business logic that other parts of the app call to get work done.",
+    component: "Renders a piece of the user interface on screen.",
+    worker: "Runs background work outside the normal request flow.",
+    schema: "Defines the shape of data the app stores.",
+    migration: "Updates the database structure when the app changes.",
+    config: "Configures how the app builds, runs or deploys.",
+    hook: "Reusable piece of UI logic shared across the interface.",
+    store: "Keeps and shares application state.",
+    test: "Checks that the related code behaves correctly.",
+    doc: "Explains part of the project for people.",
+    style: "Defines the visual styling of the interface.",
+    source: "A building block of the project's code.",
+    other: "A file in the project."
   };
-  return `${label[role] || "File"}${lang}`;
+  return `${label[role] || "A file in the project."}${lang}`;
 }
 
 // Assemble the typed, layered node/edge graph from scan + analysis outputs.
@@ -191,7 +191,7 @@ export function buildGraph(input: BuildGraphInput): BuiltGraph {
       type: "module",
       label: key,
       group: owningFeature,
-      description: `Module \`${key}\` — ${paths.length} file(s).`,
+      description: `A group of ${paths.length} related file(s) that work together.`,
       confidence: "high",
       layers: layersForNodeType("module"),
       files: paths.slice(0, 300),
@@ -284,7 +284,7 @@ export function buildGraph(input: BuildGraphInput): BuiltGraph {
       id,
       type: "externalPackage",
       label: pkg.name,
-      description: `External package imported by ${pkg.files.length} file(s).`,
+      description: `A third-party library the project relies on, used in ${pkg.files.length} file(s).`,
       confidence: "high",
       layers,
       files: pkg.files.slice(0, 50),
@@ -313,7 +313,7 @@ export function buildGraph(input: BuildGraphInput): BuiltGraph {
         id,
         type: "firebaseFunction",
         label: fn.name,
-        description: `Firebase Cloud Function (${fn.kind}) defined in ${fn.path}.`,
+        description: `A cloud function (${fn.kind}) that runs on the backend when called.`,
         confidence: "high",
         layers: layersForNodeType("firebaseFunction"),
         files: [fn.path],
@@ -332,7 +332,7 @@ export function buildGraph(input: BuildGraphInput): BuiltGraph {
         id,
         type: "firestoreCollection",
         label: col.name,
-        description: `Firestore collection \`${col.name}\` referenced by ${col.readers.length + col.writers.length} file(s).`,
+        description: `A database collection where the app stores and reads "${col.name}" records.`,
         confidence: "high",
         layers: layersForNodeType("firestoreCollection"),
         files: [...col.writers, ...col.readers].slice(0, 50),

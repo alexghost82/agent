@@ -93,6 +93,43 @@ describe("buildDesignMapFromScanGraph", () => {
     expect(byId.get("intel-route-login")?.confidence).toBe("low");
   });
 
+  it("carries the scan node's usage into design node data", () => {
+    const withUsage: ScanGraphInput = {
+      nodes: [
+        { id: "project-root", type: "project", label: "Demo" },
+        {
+          id: "feat-auth",
+          type: "feature",
+          label: "Sign-in",
+          description: "Lets people sign in",
+          usage: "Used whenever a visitor logs into the app"
+        }
+      ],
+      edges: [{ id: "e1", source: "project-root", target: "feat-auth", type: "owns" }]
+    };
+    const out = buildDesignMapFromScanGraph(project, withUsage);
+    const feat = out.nodes.find((n) => n.id === "intel-feat-auth")!;
+    expect((feat.data as any)?.usage).toBe("Used whenever a visitor logs into the app");
+    // Nodes without usage carry no `data.usage`.
+    const noUsage = buildDesignMapFromScanGraph(project, graph);
+    expect((noUsage.nodes.find((n) => n.id === "intel-route-login")!.data as any)?.usage).toBeUndefined();
+  });
+
+  it("humanizes the thin-seed stack and repository labels", () => {
+    const { nodes } = buildInitialDesignMap({
+      id: "p",
+      name: "Demo",
+      stack: "React, Node",
+      repoUrl: "https://example.com/repo"
+    });
+    const stack = nodes.find((n) => n.id === "feature-stack");
+    const repo = nodes.find((n) => n.id === "feature-repo");
+    expect(stack?.label).toBe("Technology stack");
+    expect(stack?.description).toContain("React, Node");
+    expect(repo?.label).toBe("Source repository");
+    expect(repo?.description).toContain("https://example.com/repo");
+  });
+
   it("maps intel edge types to design edge types", () => {
     const edge = (s: string, t: string) => built.edges.find((e) => e.source === s && e.target === t);
     expect(edge("intel-mod-routes", "intel-pkg-express")?.type).toBe("uses");
